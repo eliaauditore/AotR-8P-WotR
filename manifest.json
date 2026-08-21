@@ -1,7 +1,7 @@
 {
     "schema":  1,
-    "launcher_version":  "1.0.4",
+    "launcher_version":  "1.0.5",
     "launcher_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/AotR%208P%20WotR%20Mod.exe",
-    "launcher_sha256":  "9C3C1CD09626A18B5B40D62C29EF9A5D43B30B7C3E173534E761D87B7170DC80",
+    "launcher_sha256":  "9968E13FF0E0C05A3E7A1F3DCBEDEC1D3D060E00A0C72282E6EEAB9A6DC75E3B",
     "mandatory":  false
 }
