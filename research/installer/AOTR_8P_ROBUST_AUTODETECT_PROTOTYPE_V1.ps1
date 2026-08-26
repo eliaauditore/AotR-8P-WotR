@@ -277,7 +277,6 @@ function Write-PrototypeResult {
 function Get-UsbRootHints {
     $roots = New-Object System.Collections.ArrayList
 
-    # Windows Storage module hint. Read-only and optional.
     try {
         if (Get-Command Get-Disk -ErrorAction SilentlyContinue) {
             foreach ($disk in Get-Disk -ErrorAction SilentlyContinue | Where-Object { $_.BusType -eq 'USB' }) {
@@ -405,11 +404,11 @@ function Find-AgeOfTheRingDirectories {
     }
 
     [pscustomobject]@{
-        StartRoot         = $StartRoot
-        DriveClass        = $DriveClass
+        StartRoot          = $StartRoot
+        DriveClass         = $DriveClass
         VisitedDirectories = $visited
-        Limit             = $MaxDirectories
-        MaxDepth          = $MaxDepth
+        Limit              = $MaxDirectories
+        MaxDepth           = $MaxDepth
     }
 }
 
@@ -442,20 +441,18 @@ function New-FinalOutput {
         SearchStats         = @($SearchStats)
         Drives              = @($Drives)
         Safety              = [pscustomobject]@{
-            NetworkRecursiveScan = $false
-            WritesFiles          = $false
-            WritesRegistry       = $false
-            ModifiesLauncher     = $false
-            ModifiesGame         = $false
+            NetworkRecursiveScan  = $false
+            WritesFiles           = $false
+            WritesRegistry        = $false
+            ModifiesLauncher      = $false
+            ModifiesGame          = $false
             ExecutesRepairActions = $false
-            WriteabilityTest     = 'NOT_PERFORMED'
+            WriteabilityTest      = 'NOT_PERFORMED'
         }
     }
 }
 
-# ---------------------------------------------------------------------------
 # 1. Cached canonical root: production fast path.
-# ---------------------------------------------------------------------------
 $cachedState = 'NOT_PROVIDED'
 $recoveryCode = $null
 $prioritySelected = $null
@@ -500,9 +497,7 @@ if ($prioritySelected -and -not $AuditAllCandidates) {
     return
 }
 
-# ---------------------------------------------------------------------------
 # 2. Explicit AOTR_HOME override. Validate before accepting it.
-# ---------------------------------------------------------------------------
 if (-not [string]::IsNullOrWhiteSpace($env:AOTR_HOME)) {
     Add-Candidate -Path $env:AOTR_HOME -Source 'AOTR_HOME' -DriveClass 'Unknown'
     $envRoot = Resolve-CandidateRoot $env:AOTR_HOME
@@ -517,12 +512,17 @@ if (-not [string]::IsNullOrWhiteSpace($env:AOTR_HOME)) {
 }
 
 if ($prioritySelected -and -not $AuditAllCandidates) {
+    $priorityDiscoveryMode = 'FAST_CACHED_CONFIG'
+    if ($prioritySource -eq 'AOTR_HOME') {
+        $priorityDiscoveryMode = 'FAST_AOTR_HOME'
+    }
+
     $envOutput = New-FinalOutput `
         -Status 'AUTO_SELECTED' `
         -ErrorCode $null `
         -RecoveryCode $recoveryCode `
         -CachedPathState $cachedState `
-        -DiscoveryMode (if ($prioritySource -eq 'AOTR_HOME') { 'FAST_AOTR_HOME' } else { 'FAST_CACHED_CONFIG' }) `
+        -DiscoveryMode $priorityDiscoveryMode `
         -Selected $prioritySelected `
         -AmbiguityCandidates @() `
         -Candidates @($prioritySelected) `
@@ -533,9 +533,7 @@ if ($prioritySelected -and -not $AuditAllCandidates) {
     return
 }
 
-# ---------------------------------------------------------------------------
 # 3. Launcher/install environment. Do not assume launcher location is AotR.
-# ---------------------------------------------------------------------------
 if (-not [string]::IsNullOrWhiteSpace($LauncherPath)) {
     try {
         $launcherCanonical = Get-CanonicalPath $LauncherPath
@@ -557,10 +555,8 @@ if (-not [string]::IsNullOrWhiteSpace($LauncherPath)) {
     catch { }
 }
 
-# ---------------------------------------------------------------------------
 # 4-6. Normal Fixed drives first; Removable/USB/exFAT after them.
 # Network drives never enter this list.
-# ---------------------------------------------------------------------------
 $drives = @(Get-LocalDrivesByClass)
 $fixedDrives = @($drives | Where-Object { $_.DriveClass -eq 'Fixed' })
 $secondaryDrives = @($drives | Where-Object { $_.DriveClass -eq 'RemovableUsbOrExFat' })
@@ -585,9 +581,7 @@ foreach ($drive in $secondaryDrives) {
         -MaxDirectories $MaxDirectoriesPerDrive))
 }
 
-# ---------------------------------------------------------------------------
 # 7. Validate every deduplicated candidate, then score/rank.
-# ---------------------------------------------------------------------------
 $results = New-Object System.Collections.ArrayList
 foreach ($entry in $script:CandidateMap.Values) {
     [void]$results.Add((Test-AotrStandaloneRoot `
@@ -611,7 +605,8 @@ $status = 'NOT_FOUND'
 $errorCode = 'A8P-INSTALL-001'
 $selected = $null
 $ambiguity = @()
-$discoveryMode = if ($AuditAllCandidates) { 'FULL_AUDIT' } else { 'FULL_DISCOVERY' }
+$discoveryMode = 'FULL_DISCOVERY'
+if ($AuditAllCandidates) { $discoveryMode = 'FULL_AUDIT' }
 
 # Explicit validated priority sources remain authoritative even in audit mode;
 # full discovery merely adds diagnostics around them.
@@ -624,11 +619,12 @@ if ($prioritySelected) {
 
     $status = 'AUTO_SELECTED'
     $errorCode = $null
-    $discoveryMode = if ($prioritySource -eq 'CachedConfig') {
-        'FULL_AUDIT_WITH_CACHED_PRIORITY'
+
+    if ($prioritySource -eq 'CachedConfig') {
+        $discoveryMode = 'FULL_AUDIT_WITH_CACHED_PRIORITY'
     }
     else {
-        'FULL_AUDIT_WITH_AOTR_HOME_PRIORITY'
+        $discoveryMode = 'FULL_AUDIT_WITH_AOTR_HOME_PRIORITY'
     }
 }
 elseif ($eligible.Count -gt 0) {
