@@ -99,7 +99,7 @@ jobs:
               add.add("launcher");
             }
 
-            if (/\b(mismatch|out[ -]?of[ -]?sync|\boos\b|starting\.\.\.|direct launch failed|host\/client|network wotr|\blan\b)/i.test(haystack)) {
+            if (/\bmismatch\b|out[ -]?of[ -]?sync|\boos\b|starting\.\.\.|direct launch failed|host\/client|network wotr|\blan\b/i.test(haystack)) {
               add.add("multiplayer");
               add.add("sync");
             }
