@@ -1,0 +1,66 @@
+# Canonical label catalog for the AotR 8P WotR ticket system.
+# `.github/workflows/issue-triage.yml` creates missing labels automatically on issue events.
+labels:
+  - name: bug
+    color: d73a4a
+    description: Confirmed or suspected defect
+  - name: multiplayer
+    color: 0052cc
+    description: LAN or Network WotR multiplayer
+  - name: sync
+    color: 5319e7
+    description: Mismatch, OOS, state divergence, or synchronization
+  - name: launcher
+    color: 1d76db
+    description: Standalone launcher behavior
+  - name: payload
+    color: 0e8a16
+    description: Packaged payload integrity or deployment
+  - name: ui
+    color: c5def5
+    description: WotR or launcher UI
+  - name: paper
+    color: bfdadc
+    description: PaperScenario or payload_paper.inc
+  - name: auto-repair
+    color: fbca04
+    description: Launcher automatic repair system
+  - name: compatibility
+    color: f9d0c4
+    description: Version, language, Windows, or compatibility issue
+  - name: engine
+    color: b60205
+    description: Game engine or runtime behavior
+  - name: needs-triage
+    color: ededed
+    description: New issue awaiting classification
+  - name: needs-logs
+    color: d4c5f9
+    description: More logs or a support bundle are required
+  - name: duplicate
+    color: cfd3d7
+    description: Same root cause as an existing ticket
+  - name: confirmed
+    color: 0e8a16
+    description: Reproduced or otherwise confirmed
+  - name: cannot-reproduce
+    color: e4e669
+    description: Current evidence is insufficient to reproduce
+  - name: fixed
+    color: 0e8a16
+    description: Fix is implemented and verified
+  - name: feature
+    color: a2eeef
+    description: Enhancement request
+  - name: priority:critical
+    color: b60205
+    description: Blocks launch, corrupts state, or widespread critical failure
+  - name: priority:high
+    color: d93f0b
+    description: Major defect with significant user impact
+  - name: priority:medium
+    color: fbca04
+    description: Important but non-critical
+  - name: priority:low
+    color: 0e8a16
+    description: Minor impact or low urgency
