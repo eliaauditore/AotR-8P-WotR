@@ -38,7 +38,17 @@ function Write-HashGroups {
         return
     }
 
-    $groups = @($Rows | Group-Object SHA256 | Sort-Object Count -Descending, Name)
+    $groups = @(
+        $Rows |
+            Group-Object SHA256 |
+            Sort-Object @{
+                Expression = { $_.Count }
+                Descending = $true
+            }, @{
+                Expression = { $_.Name }
+                Ascending = $true
+            }
+    )
     foreach ($g in $groups) {
         $match = (-not [string]::IsNullOrWhiteSpace($Expected) -and $g.Name -eq $Expected)
         $tag = if ($match) { 'EXPECTED MATCH' } else { 'UNPINNED/OTHER' }
