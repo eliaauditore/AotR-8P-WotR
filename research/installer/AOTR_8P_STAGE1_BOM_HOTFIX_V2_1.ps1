@@ -108,7 +108,3 @@ if ([string]::IsNullOrWhiteSpace($BuilderPath)) {
 else {
     & $patchedPath -Base $Base -BuilderPath $BuilderPath
 }
-
-if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
