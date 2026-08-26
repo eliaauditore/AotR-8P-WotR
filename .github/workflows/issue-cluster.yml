@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: a8p-master-ticket-clustering
+  group: a8p-issue-processing
   cancel-in-progress: false
 
 jobs:
@@ -23,6 +23,7 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
+            const crypto = require("crypto");
             const { owner, repo } = context.repo;
 
             const clusterLabels = {
@@ -42,9 +43,25 @@ jobs:
 
             const ticketId = number => `A8P-TICKET-${String(number).padStart(4, "0")}`;
             const labelNames = item => (item.labels || []).map(label => typeof label === "string" ? label : label.name);
-            const extractFingerprint = text => {
-              const match = (text || "").match(/\bA8P-FP-[A-F0-9]{12}\b/i);
-              return match ? match[0].toUpperCase() : null;
+            const resolveFingerprint = text => {
+              const source = text || "";
+              const direct = source.match(/\bA8P-FP-[A-F0-9]{12}\b/i);
+              if (direct) return direct[0].toUpperCase();
+
+              const errorCodeMatch = source.match(/\bA8P-(?!FP-)[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b/i);
+              const errorSectionMatch = source.match(/###\s+(?:Exact error(?: \/ visible state)?|Exact error message|Original error)\s*\n+([\s\S]*?)(?=\n###\s|\s*$)/i);
+              if (!errorCodeMatch || !errorSectionMatch) return null;
+
+              const normalizedError = errorSectionMatch[1]
+                .replace(/```(?:text)?/gi, "")
+                .replace(/```/g, "")
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, " ");
+              if (!normalizedError) return null;
+
+              const signature = `${errorCodeMatch[0].toUpperCase()}|${normalizedError}`;
+              return `A8P-FP-${crypto.createHash("sha256").update(signature, "utf8").digest("hex").slice(0, 12).toUpperCase()}`;
             };
 
             const removeLabel = async (issueNumber, label) => {
@@ -73,9 +90,9 @@ jobs:
 
             if (current.pull_request) return;
 
-            const fingerprint = extractFingerprint(current.body);
+            const fingerprint = resolveFingerprint(current.body);
             if (!fingerprint) {
-              core.info("No support fingerprint yet; waiting for triage metadata/fingerprint generation.");
+              core.info("No stable support fingerprint can be resolved for this issue.");
               return;
             }
 
@@ -88,7 +105,7 @@ jobs:
 
             let candidates = allItems
               .filter(item => !item.pull_request)
-              .filter(item => extractFingerprint(item.body) === fingerprint);
+              .filter(item => resolveFingerprint(item.body) === fingerprint);
 
             if (!candidates.some(item => item.number === current.number)) {
               candidates.push(current);
@@ -246,6 +263,8 @@ jobs:
                   state: "closed"
                 });
               }
+
+              await removeLabel(child.number, "needs-triage");
             }
 
             core.info(`Cluster ${fingerprint}: master ${masterId}, ${candidates.length} affected report(s).`);
