@@ -1,0 +1,166 @@
+name: Multiplayer / Sync Problem
+description: Report LAN, Network WotR, mismatch, OOS, Starting..., Direct Launch Failed, or host/client divergence.
+title: "[Multiplayer] "
+labels:
+  - bug
+  - multiplayer
+  - sync
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for multiplayer and synchronization failures.
+        Hashes, language, host/client role, and the exact failure point are especially important.
+
+  - type: dropdown
+    id: failure_type
+    attributes:
+      label: Failure type
+      options:
+        - LAN connection problem
+        - Network WotR problem
+        - Mismatch
+        - OOS / out of sync
+        - Starting...
+        - Direct Launch Failed
+        - Language/version mismatch
+        - Payload/file hash mismatch
+        - Host/client behavior differs
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: pc_count
+    attributes:
+      label: Number of PCs
+      placeholder: "2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: roles
+    attributes:
+      label: Host / client layout
+      description: Identify the host and each client.
+      placeholder: |
+        PC1 = Host
+        PC2 = Client
+    validations:
+      required: true
+
+  - type: textarea
+    id: launcher_versions
+    attributes:
+      label: Launcher version on every PC
+      placeholder: |
+        PC1: 1.0.9
+        PC2: 1.0.9
+    validations:
+      required: true
+
+  - type: textarea
+    id: aotr_versions
+    attributes:
+      label: AotR version on every PC
+      placeholder: |
+        PC1: 9.3.2
+        PC2: 9.3.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: languages
+    attributes:
+      label: Game language on every PC
+      placeholder: |
+        PC1: English
+        PC2: German
+    validations:
+      required: true
+
+  - type: textarea
+    id: hashes
+    attributes:
+      label: Relevant hashes
+      description: Include launcher, UI payload, paper payload, or other relevant file hashes per PC.
+      placeholder: |
+        PC1 payload_ui.big: ...
+        PC2 payload_ui.big: ...
+        PC1 payload_paper.inc: ...
+        PC2 payload_paper.inc: ...
+
+  - type: input
+    id: error_time
+    attributes:
+      label: Exact point / time of failure
+      description: State the phase or action where it fails and, if useful, a timestamp.
+      placeholder: "After host presses Start; 2026-08-26 20:14:32"
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: Reproducible?
+      options:
+        - "Yes, every time"
+        - "Sometimes"
+        - "No / only once"
+        - "Not tested yet"
+    validations:
+      required: true
+
+  - type: input
+    id: error_code
+    attributes:
+      label: A8P Error Code
+      placeholder: "A8P-RUNTIME-001"
+
+  - type: input
+    id: fingerprint
+    attributes:
+      label: Support Fingerprint
+      description: Stable error-class fingerprint. Format `A8P-FP-XXXXXXXXXXXX`.
+      placeholder: "A8P-FP-1A2B3C4D5E6F"
+
+  - type: textarea
+    id: exact_error
+    attributes:
+      label: Exact error / visible state
+      description: Include exact text such as `Starting...`, `Direct Launch Failed`, mismatch, or OOS details.
+      render: text
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or support bundles
+      description: Attach evidence from every affected PC where possible. Remove personal data before uploading.
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I compared versions, language, and relevant hashes between the participating PCs.
+          required: true

@@ -1,0 +1,135 @@
+name: Auto-Repair Failure
+description: Report a problem that the launcher detected but could not repair automatically.
+title: "[Auto-Repair] "
+labels:
+  - bug
+  - auto-repair
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form feeds the loop:
+        **error → fingerprint → issue → diagnosis → repair rule → launcher update → future automatic repair**.
+
+  - type: input
+    id: error_code
+    attributes:
+      label: A8P Error Code
+      description: Copy the exact stable error/repair ID.
+      placeholder: "A8P-RUNTIME-001"
+    validations:
+      required: true
+
+  - type: input
+    id: fingerprint
+    attributes:
+      label: Support Fingerprint
+      description: Stable error-class fingerprint. Format `A8P-FP-XXXXXXXXXXXX`.
+      placeholder: "A8P-FP-1A2B3C4D5E6F"
+    validations:
+      required: true
+
+  - type: textarea
+    id: original_error
+    attributes:
+      label: Original error
+      description: Exact error before the repair attempt.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: repair_plan
+    attributes:
+      label: Repair plan
+      description: Plan selected by `repair-manifest.json` or the launcher.
+      placeholder: |
+        A8P-RUNTIME-001:
+        - stop_legacy_runtime
+        - stop_failed_game
+        - reset_runtime
+        - repair_payloads
+        - retry_launch
+    validations:
+      required: true
+
+  - type: textarea
+    id: action_results
+    attributes:
+      label: Executed actions and result of each action
+      placeholder: |
+        stop_legacy_runtime: success
+        reset_runtime: success
+        repair_payloads: failed - ...
+        retry_launch: not reached
+    validations:
+      required: true
+
+  - type: textarea
+    id: before_state
+    attributes:
+      label: State before repair
+      description: Relevant processes, files, versions, hashes, or launcher state.
+    validations:
+      required: true
+
+  - type: textarea
+    id: after_state
+    attributes:
+      label: State after repair
+      description: What changed and what remained broken?
+    validations:
+      required: true
+
+  - type: textarea
+    id: hashes
+    attributes:
+      label: Expected / actual hashes
+      placeholder: |
+        payload_ui.big expected: ...
+        payload_ui.big actual: ...
+        payload_paper.inc expected: ...
+        payload_paper.inc actual: ...
+
+  - type: input
+    id: last_retry
+    attributes:
+      label: Last retry
+      placeholder: "2026-08-26T20:14:32+02:00"
+
+  - type: input
+    id: launcher_version
+    attributes:
+      label: Launcher version
+      placeholder: "1.0.9"
+    validations:
+      required: true
+
+  - type: input
+    id: aotr_version
+    attributes:
+      label: AotR version
+      placeholder: "9.3.2"
+
+  - type: input
+    id: windows_version
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / support bundle
+      description: Attach the launcher log and support-bundle JSON if available. Remove personal data before uploading.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I did not manually edit the repair-manifest while reproducing this failure.
+          required: true
