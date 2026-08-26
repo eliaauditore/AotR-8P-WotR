@@ -1,0 +1,117 @@
+name: Issue Triage
+
+on:
+  issues:
+    types: [opened, reopened, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure labels and classify issue
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const labels = {
+              "bug": ["d73a4a", "Confirmed or suspected defect"],
+              "multiplayer": ["0052cc", "LAN or Network WotR multiplayer"],
+              "sync": ["5319e7", "Mismatch, OOS, state divergence, or synchronization"],
+              "launcher": ["1d76db", "Standalone launcher behavior"],
+              "payload": ["0e8a16", "Packaged payload integrity or deployment"],
+              "ui": ["c5def5", "WotR or launcher UI"],
+              "paper": ["bfdadc", "PaperScenario or payload_paper.inc"],
+              "auto-repair": ["fbca04", "Launcher automatic repair system"],
+              "compatibility": ["f9d0c4", "Version, language, Windows, or compatibility issue"],
+              "engine": ["b60205", "Game engine or runtime behavior"],
+              "needs-triage": ["ededed", "New issue awaiting classification"],
+              "needs-logs": ["d4c5f9", "More logs or a support bundle are required"],
+              "duplicate": ["cfd3d7", "Same root cause as an existing ticket"],
+              "confirmed": ["0e8a16", "Reproduced or otherwise confirmed"],
+              "cannot-reproduce": ["e4e669", "Current evidence is insufficient to reproduce"],
+              "fixed": ["0e8a16", "Fix is implemented and verified"],
+              "feature": ["a2eeef", "Enhancement request"],
+              "priority:critical": ["b60205", "Blocks launch, corrupts state, or widespread critical failure"],
+              "priority:high": ["d93f0b", "Major defect with significant user impact"],
+              "priority:medium": ["fbca04", "Important but non-critical"],
+              "priority:low": ["0e8a16", "Minor impact or low urgency"]
+            };
+
+            const { owner, repo } = context.repo;
+
+            for (const [name, [color, description]] of Object.entries(labels)) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({ owner, repo, name, color, description });
+              }
+            }
+
+            if (!context.payload.issue) {
+              core.info("Label catalog synchronized; no issue payload to classify.");
+              return;
+            }
+
+            const issue = context.payload.issue;
+            const title = issue.title || "";
+            const body = issue.body || "";
+            const haystack = `${title}\n${body}`;
+            const add = new Set(["needs-triage"]);
+
+            if (title.startsWith("[Bug]")) {
+              add.add("bug");
+              add.add("launcher");
+            }
+            if (title.startsWith("[Multiplayer]")) {
+              add.add("bug");
+              add.add("multiplayer");
+              add.add("sync");
+            }
+            if (title.startsWith("[Auto-Repair]")) {
+              add.add("bug");
+              add.add("auto-repair");
+              add.add("launcher");
+            }
+            if (title.startsWith("[Feature]")) {
+              add.add("feature");
+            }
+
+            if (/A8P-PAYLOAD-UI-[A-Z0-9-]*/i.test(haystack)) {
+              add.add("payload");
+              add.add("ui");
+            }
+            if (/A8P-PAYLOAD-PAPER-[A-Z0-9-]*/i.test(haystack)) {
+              add.add("payload");
+              add.add("paper");
+            }
+            if (/A8P-COMPAT-[A-Z0-9-]*/i.test(haystack)) {
+              add.add("compatibility");
+            }
+            if (/A8P-ENGINE-[A-Z0-9-]*/i.test(haystack)) {
+              add.add("engine");
+            }
+            if (/A8P-(INSTALL|LEGACY|PROCESS|RUNTIME|GAMEPROC|PERMISSION)-[A-Z0-9-]*/i.test(haystack)) {
+              add.add("launcher");
+            }
+
+            if (/\b(mismatch|out[ -]?of[ -]?sync|\boos\b|starting\.\.\.|direct launch failed|host\/client|network wotr|\blan\b)/i.test(haystack)) {
+              add.add("multiplayer");
+              add.add("sync");
+            }
+
+            const hasFingerprint = /A8P-FP-[A-F0-9]{12}\b/i.test(body);
+            if (!hasFingerprint && (add.has("auto-repair") || add.has("multiplayer"))) {
+              add.add("needs-logs");
+            }
+
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issue.number,
+              labels: [...add]
+            });
