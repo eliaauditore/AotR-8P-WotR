@@ -243,8 +243,7 @@ jobs:
                   owner,
                   repo,
                   issue_number: child.number,
-                  state: "closed",
-                  state_reason: "duplicate"
+                  state: "closed"
                 });
               }
             }
