@@ -137,7 +137,11 @@ function Get-BuilderCandidates {
         }
     }
 
-    return @($items | Sort-Object LastWriteTime -Descending, Name)
+    return @(
+        $items | Sort-Object -Property `
+            @{ Expression = 'LastWriteTime'; Descending = $true }, `
+            @{ Expression = 'Name'; Descending = $false }
+    )
 }
 
 function Get-FunctionRanges {
