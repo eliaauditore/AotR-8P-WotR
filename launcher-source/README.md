@@ -22,44 +22,41 @@ Both local copies were verified byte-identical before this branch was created.
 
 ## V18 ticket-system release candidate
 
-A V18 source candidate has now been generated from the verified V17 baseline. It is **not released yet** and must pass a Windows build/runtime test before any public release artifact is changed.
+A V18 candidate has been derived from the verified V17 source with launcher-side support for:
 
-Candidate builder:
+- local `A8P-FP-*` fingerprint generation;
+- privacy-safe support-bundle generation;
+- a single Auto-Repair cycle followed by one automatic retry;
+- `REPORT ERROR` only after Auto-Repair is exhausted and the retry still fails;
+- prefilled GitHub issue reporting without embedding a GitHub write token;
+- `MESSAGES` with local unread state and public master-ticket update checks.
 
-`BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_TICKET_SYSTEM.ps1`
+Static verification performed before the first Windows build confirmed that the embedded engine payload remained byte-identical to V17 and that launcher changes were confined to the GUI/support payload.
 
-Verified candidate properties:
+### First successful Windows build
 
-- Size: `258302` bytes
-- SHA256: `3119B095F1D603D3E31BC26073967F51EF737245ED2B353BD1E3DD622ACF6250`
-- Embedded GUI SHA256: `B8380F4D03DE10BE78452536CF87B1101D3F246D49D5A40FA3A70DAF35917D84`
-- Embedded engine SHA256: `D94460492ACD2B98CB8DF0929E302C2F626A97045AAEE9593A2B29E9424FEA5B`
-- Embedded engine is byte-identical to V17.
-- C# wrapper outside the embedded GUI blob is byte-identical to V17.
-- Main, diagnostics, and Messages XAML all parse as well-formed XML.
-- Static PowerShell token/bracket balance check passes.
-- No obvious GitHub token/API secret/email/personal `C:\Users\...` path was found in the candidate source.
+The first V18 RC build succeeded on 2026-08-27 using Windows PowerShell 5.1 as the build host:
 
-### V18 behavior
+- Launcher version: `1.0.10-rc1`
+- RC EXE SHA256: `78BA3FA066ED53467ADC7E1356394456C2ABB21883DA4CA16880630D1CB176DB`
+- Build mode: `-EmitGitHubBundle -BundleOnly`
+- Result: update launcher built without replacing the installed/local launcher.
 
-- Computes a stable local `A8P-FP-*` fingerprint using the same normalized error signature as GitHub triage.
-- Records Auto-Repair actions/results and writes `support_bundle_latest.json` locally.
-- Sanitizes default report text for user/profile/package/AotR paths, computer/user names, IPv4, IPv6, and MAC addresses.
-- Fixes the V17 repair loop: one Auto-Repair cycle -> one automatic retry -> `REPORT ERROR` if the retry still fails.
-- Adds `RETRY` and `REPORT ERROR` to the final diagnostics state.
-- Opens a user-reviewed prefilled GitHub issue; no repository write credential is embedded in the launcher.
-- Uses a compact prefill fallback if the GitHub issue URL would exceed a conservative safe length, while preserving the full support bundle locally and on the clipboard.
-- Adds `MESSAGES` plus a local unread indicator and public master-ticket maintainer-message lookup.
-- Read/unread state remains local; no read receipt or player/device identity is sent to GitHub.
+A PowerShell 7.6.5 build attempt failed because the legacy .NET Framework C# compiler was handed the .NET 10 `System.Management.Automation.dll`. This is a build-host/toolchain mismatch, not a launcher-runtime or ticket-system failure. Windows PowerShell 5.1 proved the existing V18 source builds successfully. A follow-up builder compatibility fix should explicitly select the Windows PowerShell 5.1 automation assembly when invoked from PowerShell 7.
 
 ## Safety rule
 
 Do not change the current public launcher EXE, `manifest.json`, `repair-manifest.json`, `payload_ui.big`, or `payload_paper.inc` merely by adding source material here.
 
-The 1.0.9 baseline must remain reproducible. Functional launcher changes are promoted only after source verification and a Windows build/runtime regression test.
+The first source commit should preserve the exact 1.0.9 builder byte-for-byte. Functional launcher changes belong in later commits after the baseline source hash is verified.
 
-## Remaining gate
+## Planned ticket-system integration
 
-1. Build V18 on Windows with `-BundleOnly -EmitGitHubBundle` so the installed 1.0.9 launcher is not replaced.
-2. Launch the generated candidate from `_GITHUB_UPDATE` and smoke-test normal launch, Auto-Repair failure -> Report Error, fingerprint/support bundle, and Messages UI.
-3. Only after the smoke test passes, commit the exact source artifacts, open the integration PR, run repository checks, and promote a new public launcher version.
+1. Version the exact V17 baseline source and reproducible embedded payload extraction.
+2. Version the V18 ticket-system builder after runtime validation.
+3. Validate the V18 RC GUI and normal launch path on Windows.
+4. Validate `MESSAGES` and local unread state.
+5. Validate an exhausted Auto-Repair path and `REPORT ERROR` end-to-end with a controlled synthetic failure.
+6. Validate that the generated support bundle matches `docs/support-bundle.schema.json` and contains no personal absolute paths or identifiers.
+7. Validate the PowerShell 7 build-host compatibility fix separately.
+8. Only after regression tests pass, prepare the launcher update release and then update release artifacts deliberately.
