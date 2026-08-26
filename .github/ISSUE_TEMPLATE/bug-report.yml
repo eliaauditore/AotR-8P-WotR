@@ -1,0 +1,134 @@
+name: Bug Report
+description: Report a launcher or mod problem that is not specifically multiplayer or an auto-repair failure.
+title: "[Bug] "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem with AotR 8P WotR.
+        If the launcher shows an `A8P-*` error code or `A8P-FP-*` fingerprint, copy it exactly.
+
+  - type: input
+    id: launcher_version
+    attributes:
+      label: Launcher version
+      description: Version shown by the launcher.
+      placeholder: "1.0.9"
+    validations:
+      required: true
+
+  - type: input
+    id: aotr_version
+    attributes:
+      label: AotR version
+      placeholder: "9.3.2"
+    validations:
+      required: true
+
+  - type: input
+    id: windows_version
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem description
+      description: What were you trying to do, and what went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: exact_error
+    attributes:
+      label: Exact error message
+      description: Paste the complete error text if available. Do not paraphrase it.
+      render: text
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start ...
+        2. Click ...
+        3. Error appears ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: input
+    id: error_code
+    attributes:
+      label: A8P Error Code
+      description: Copy the stable launcher/repair code exactly, if one exists.
+      placeholder: "A8P-RUNTIME-001"
+
+  - type: input
+    id: fingerprint
+    attributes:
+      label: Support Fingerprint
+      description: Stable error-class fingerprint. Format `A8P-FP-XXXXXXXXXXXX`.
+      placeholder: "A8P-FP-1A2B3C4D5E6F"
+
+  - type: input
+    id: relevant_file
+    attributes:
+      label: Relevant file
+      placeholder: "payload_ui.big"
+
+  - type: input
+    id: expected_sha256
+    attributes:
+      label: Expected SHA256
+      placeholder: "64 hexadecimal characters"
+
+  - type: input
+    id: actual_sha256
+    attributes:
+      label: Actual SHA256
+      placeholder: "64 hexadecimal characters"
+
+  - type: textarea
+    id: repair_actions
+    attributes:
+      label: Repair actions already executed
+      description: List automatic or manual repair actions already attempted.
+      placeholder: |
+        - reset_runtime
+        - repair_payloads
+        - retry_launch
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or support bundle
+      description: Drag files here or paste relevant log excerpts. Remove personal data before uploading.
+      placeholder: "Attach screenshots/logs/support-bundle.json here."
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I checked for an existing issue with the same error code or fingerprint.
+          required: true
