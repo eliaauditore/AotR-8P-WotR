@@ -13,15 +13,18 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
-      - name: Ensure labels and classify issue
+      - name: Ensure labels, assign ticket metadata, and classify issue
         uses: actions/github-script@v8
         with:
           script: |
+            const crypto = require("crypto");
+
             const labels = {
               "bug": ["d73a4a", "Confirmed or suspected defect"],
               "multiplayer": ["0052cc", "LAN or Network WotR multiplayer"],
               "sync": ["5319e7", "Mismatch, OOS, state divergence, or synchronization"],
               "launcher": ["1d76db", "Standalone launcher behavior"],
+              "launcher-report": ["0366d6", "Report opened from the launcher after auto-repair failed"],
               "payload": ["0e8a16", "Packaged payload integrity or deployment"],
               "ui": ["c5def5", "WotR or launcher UI"],
               "paper": ["bfdadc", "PaperScenario or payload_paper.inc"],
@@ -59,7 +62,60 @@ jobs:
 
             const issue = context.payload.issue;
             const title = issue.title || "";
-            const body = issue.body || "";
+            let body = issue.body || "";
+            const ticketId = `A8P-TICKET-${String(issue.number).padStart(4, "0")}`;
+
+            let fingerprintMatch = body.match(/\bA8P-FP-[A-F0-9]{12}\b/i);
+            let fingerprint = fingerprintMatch ? fingerprintMatch[0].toUpperCase() : null;
+
+            if (!fingerprint) {
+              const errorCodeMatch = body.match(/\bA8P-(?!FP-)[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b/i);
+              const errorSectionMatch = body.match(/###\s+(?:Exact error(?: \/ visible state)?|Exact error message|Original error)\s*\n+([\s\S]*?)(?=\n###\s|\s*$)/i);
+
+              if (errorCodeMatch && errorSectionMatch) {
+                const normalizedError = errorSectionMatch[1]
+                  .replace(/```(?:text)?/gi, "")
+                  .replace(/```/g, "")
+                  .trim()
+                  .toLowerCase()
+                  .replace(/\s+/g, " ");
+
+                if (normalizedError) {
+                  const signature = `${errorCodeMatch[0].toUpperCase()}|${normalizedError}`;
+                  fingerprint = `A8P-FP-${crypto.createHash("sha256").update(signature, "utf8").digest("hex").slice(0, 12).toUpperCase()}`;
+                }
+              }
+            }
+
+            const metadataMarker = "<!-- a8p-ticket-metadata -->";
+            if (!body.includes(metadataMarker)) {
+              const metadata = [
+                metadataMarker,
+                `**Ticket ID:** \`${ticketId}\``,
+                fingerprint ? `**Support Fingerprint:** \`${fingerprint}\`` : null,
+                ""
+              ].filter(value => value !== null).join("  \n");
+
+              body = `${metadata}\n${body}`;
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body
+              });
+            } else if (fingerprint && !/\bA8P-FP-[A-F0-9]{12}\b/i.test(body)) {
+              body = body.replace(
+                /\*\*Ticket ID:\*\*\s*`A8P-TICKET-[0-9]{4,}`/i,
+                match => `${match}  \n**Support Fingerprint:** \`${fingerprint}\``
+              );
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body
+              });
+            }
+
             const haystack = `${title}\n${body}`;
             const add = new Set(["needs-triage"]);
 
@@ -76,6 +132,12 @@ jobs:
               add.add("bug");
               add.add("auto-repair");
               add.add("launcher");
+            }
+            if (title.startsWith("[Launcher Report]")) {
+              add.add("bug");
+              add.add("launcher");
+              add.add("auto-repair");
+              add.add("launcher-report");
             }
             if (title.startsWith("[Feature]")) {
               add.add("feature");
@@ -104,8 +166,13 @@ jobs:
               add.add("sync");
             }
 
-            const hasFingerprint = /A8P-FP-[A-F0-9]{12}\b/i.test(body);
+            const hasFingerprint = Boolean(fingerprint) || /\bA8P-FP-[A-F0-9]{12}\b/i.test(body);
+            const hasSupportBundle = /"schema"\s*:\s*1/i.test(body) && /"repair_attempts"\s*:/i.test(body);
+
             if (!hasFingerprint && (add.has("auto-repair") || add.has("multiplayer"))) {
+              add.add("needs-logs");
+            }
+            if (add.has("launcher-report") && !hasSupportBundle) {
               add.add("needs-logs");
             }
 
@@ -115,3 +182,5 @@ jobs:
               issue_number: issue.number,
               labels: [...add]
             });
+
+            core.info(`Assigned ${ticketId}${fingerprint ? ` / ${fingerprint}` : ""}`);
