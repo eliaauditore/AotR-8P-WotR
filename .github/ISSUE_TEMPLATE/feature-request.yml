@@ -1,0 +1,60 @@
+name: Feature Request
+description: Suggest a launcher, mod, multiplayer, diagnostics, or auto-repair improvement.
+title: "[Feature] "
+labels:
+  - feature
+  - needs-triage
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What limitation or workflow should be improved?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed feature
+      description: Describe the desired behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: benefit
+    attributes:
+      label: Expected benefit
+      description: Who benefits and how?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Launcher
+        - Multiplayer / Network WotR
+        - Auto-Repair
+        - Payload / packaging
+        - UI
+        - PaperScenario
+        - Compatibility
+        - Engine / runtime
+        - Diagnostics / support bundle
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, examples, related issues, or technical notes.
