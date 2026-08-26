@@ -54,6 +54,7 @@ Final builder checks:
 - `A8P-TEST-001`: 0 occurrences
 - synthetic validation error string: 0 occurrences
 - `Get-FileHash`: 0 occurrences
+- Builder SHA256: `7D847B66CAF060F3E1C5FD539DA3DF6E97865421651608CDD98898342C1BB2E0`
 
 Successful `-EmitGitHubBundle -BundleOnly` production build:
 
@@ -61,8 +62,12 @@ Successful `-EmitGitHubBundle -BundleOnly` production build:
 - Launcher EXE SHA256: `6A80E0F7B862ABE3E0F19C3DF5ED9EE9EE730F246CF603ED00A39D1EE7DFF2F8`
 - Build completed without replacing the local installed launcher.
 
-The final release artifacts must not be promoted to `main` until this exact final EXE hash passes one final normal-launch regression test.
+### Final regression passed
+
+The exact final EXE hash above was copied into a fresh isolated test package and launched normally on Windows. The final `1.0.10` build completed compatibility checks, activated the existing 8P runtime path, started AotR successfully, produced no Auto-Repair/error state, and the launcher exited cleanly after game start.
+
+This exact EXE hash is the approved production release candidate.
 
 ## Safety rule
 
-Do not modify or promote the current public launcher EXE, `manifest.json`, `repair-manifest.json`, `payload_ui.big`, or `payload_paper.inc` until the final 1.0.10 regression test is confirmed.
+The current public `1.0.9` launcher EXE, `manifest.json`, `repair-manifest.json`, `payload_ui.big`, and `payload_paper.inc` remain unchanged on `main` until the separately generated five-file `1.0.10` update bundle is deliberately promoted.
