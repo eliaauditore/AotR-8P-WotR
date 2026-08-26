@@ -9,6 +9,10 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: a8p-issue-processing
+  cancel-in-progress: false
+
 jobs:
   triage:
     runs-on: ubuntu-latest
@@ -25,6 +29,9 @@ jobs:
               "sync": ["5319e7", "Mismatch, OOS, state divergence, or synchronization"],
               "launcher": ["1d76db", "Standalone launcher behavior"],
               "launcher-report": ["0366d6", "Report opened from the launcher after auto-repair failed"],
+              "master-ticket": ["6f42c1", "Canonical issue for one support fingerprint/error cluster"],
+              "cluster-member": ["bfd4f2", "Individual report linked to a master ticket"],
+              "needs-retest": ["fef2c0", "Maintainer asked affected players to verify a proposed fix"],
               "payload": ["0e8a16", "Packaged payload integrity or deployment"],
               "ui": ["c5def5", "WotR or launcher UI"],
               "paper": ["bfdadc", "PaperScenario or payload_paper.inc"],
@@ -60,7 +67,14 @@ jobs:
               return;
             }
 
-            const issue = context.payload.issue;
+            const { data: issue } = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: context.payload.issue.number
+            });
+
+            if (issue.pull_request) return;
+
             const title = issue.title || "";
             let body = issue.body || "";
             const ticketId = `A8P-TICKET-${String(issue.number).padStart(4, "0")}`;
@@ -88,32 +102,30 @@ jobs:
             }
 
             const metadataMarker = "<!-- a8p-ticket-metadata -->";
-            if (!body.includes(metadataMarker)) {
+            let desiredBody = body;
+            if (!desiredBody.includes(metadataMarker)) {
               const metadata = [
                 metadataMarker,
                 `**Ticket ID:** \`${ticketId}\``,
                 fingerprint ? `**Support Fingerprint:** \`${fingerprint}\`` : null,
                 ""
               ].filter(value => value !== null).join("  \n");
-
-              body = `${metadata}\n${body}`;
-              await github.rest.issues.update({
-                owner,
-                repo,
-                issue_number: issue.number,
-                body
-              });
-            } else if (fingerprint && !/\bA8P-FP-[A-F0-9]{12}\b/i.test(body)) {
-              body = body.replace(
+              desiredBody = `${metadata}\n${desiredBody}`;
+            } else if (fingerprint && !/\bA8P-FP-[A-F0-9]{12}\b/i.test(desiredBody)) {
+              desiredBody = desiredBody.replace(
                 /\*\*Ticket ID:\*\*\s*`A8P-TICKET-[0-9]{4,}`/i,
                 match => `${match}  \n**Support Fingerprint:** \`${fingerprint}\``
               );
+            }
+
+            if (desiredBody !== body) {
               await github.rest.issues.update({
                 owner,
                 repo,
                 issue_number: issue.number,
-                body
+                body: desiredBody
               });
+              body = desiredBody;
             }
 
             const haystack = `${title}\n${body}`;
@@ -176,6 +188,15 @@ jobs:
               add.add("needs-logs");
             }
 
+            const { data: latest } = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: issue.number
+            });
+            const latestLabels = (latest.labels || []).map(label => typeof label === "string" ? label : label.name);
+            const isClusterChild = latestLabels.includes("cluster-member") || latestLabels.includes("duplicate");
+            if (isClusterChild) add.delete("needs-triage");
+
             await github.rest.issues.addLabels({
               owner,
               repo,
@@ -183,4 +204,12 @@ jobs:
               labels: [...add]
             });
 
-            core.info(`Assigned ${ticketId}${fingerprint ? ` / ${fingerprint}` : ""}`);
+            if (isClusterChild) {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: issue.number, name: "needs-triage" });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            core.info(`Assigned ${ticketId}${fingerprint ? ` / ${fingerprint}` : ""}${isClusterChild ? " / clustered child" : ""}`);
