@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/eliaauditore/AotR-8P-WotR/blob/main/docs/support-bundle.schema.json",
+  "title": "AotR 8P WotR Launcher Support Bundle",
+  "description": "Portable diagnostic data for mapping a launcher failure to a stable error code, fingerprint, GitHub issue, and future repair rule.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "launcher_version",
+    "timestamp",
+    "windows",
+    "aotr_version",
+    "language",
+    "files",
+    "repair_attempts",
+    "last_error"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "launcher_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "error_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^A8P-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}$"
+    },
+    "fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^A8P-FP-[A-F0-9]{12}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "windows": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aotr_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1
+    },
+    "machine_role": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "host",
+        "client",
+        "single-player",
+        null
+      ]
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional random per-session identifier. Must not contain a username, IP address, or other personal identifier."
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pc_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 8
+        },
+        "failure_phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reproducible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "exists"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "expected_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Fa-f0-9]{64}$"
+          },
+          "actual_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Fa-f0-9]{64}$"
+          }
+        }
+      }
+    },
+    "repair_plan": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source_error_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "repair_attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "timestamp",
+          "action",
+          "result"
+        ],
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failed",
+              "skipped",
+              "not_reached"
+            ]
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "last_retry": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_error": {
+      "type": "string"
+    },
+    "log_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}
