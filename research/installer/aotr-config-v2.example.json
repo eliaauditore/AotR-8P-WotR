@@ -1,0 +1,10 @@
+{
+  "schema": 2,
+  "aotr_root": "D:\\Games\\AotR\\AgeoftheRing",
+  "runtime": "D:\\Games\\AotR\\AgeoftheRing\\rotwk",
+  "source_mod": "D:\\Games\\AotR\\AgeoftheRing\\aotr",
+  "game_dat": "D:\\Games\\AotR\\AgeoftheRing\\rotwk\\game.dat",
+  "validation": "aotr-standalone-v2",
+  "score": 120,
+  "last_verified_utc": ""
+}
