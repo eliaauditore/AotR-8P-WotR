@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "launcher_version": "1.0.9",
+  "error_code": "A8P-RUNTIME-001",
+  "fingerprint": "A8P-FP-1A2B3C4D5E6F",
+  "timestamp": "2026-08-26T20:14:32+02:00",
+  "windows": "Windows 11 24H2",
+  "aotr_version": "9.3.2",
+  "language": "English",
+  "machine_role": "host",
+  "session_id": null,
+  "network": {
+    "pc_count": 2,
+    "failure_phase": "Direct launch",
+    "reproducible": true
+  },
+  "files": [
+    {
+      "path": "payload_ui.big",
+      "role": "ui_payload",
+      "exists": true,
+      "size": 366667,
+      "expected_sha256": "827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376",
+      "actual_sha256": "827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376"
+    },
+    {
+      "path": "payload_paper.inc",
+      "role": "paper_payload",
+      "exists": true,
+      "size": 1648,
+      "expected_sha256": "3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43",
+      "actual_sha256": "3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43"
+    }
+  ],
+  "repair_plan": {
+    "source_error_code": "A8P-RUNTIME-001",
+    "actions": [
+      "stop_legacy_runtime",
+      "stop_failed_game",
+      "reset_runtime",
+      "repair_payloads",
+      "retry_launch"
+    ]
+  },
+  "repair_attempts": [
+    {
+      "timestamp": "2026-08-26T20:14:33+02:00",
+      "action": "reset_runtime",
+      "result": "success",
+      "detail": null
+    },
+    {
+      "timestamp": "2026-08-26T20:14:35+02:00",
+      "action": "repair_payloads",
+      "result": "failed",
+      "detail": "Example failure detail"
+    }
+  ],
+  "last_retry": "2026-08-26T20:14:40+02:00",
+  "last_error": "Direct Launch Failed",
+  "log_files": [
+    "launcher.log"
+  ],
+  "notes": null
+}
