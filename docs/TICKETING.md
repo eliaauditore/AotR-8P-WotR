@@ -4,16 +4,17 @@ GitHub Issues is the canonical support and defect tracker for the AotR 8 Player 
 
 ## Workflow
 
-**Player Report → GitHub Issue → Triage → Fingerprint / error class → Diagnosis → Fix or repair-manifest extension → Retest → Closed**
+**Player Report → GitHub Issue → Triage → Fingerprint / error class → Master Ticket → Diagnosis → Fix or repair-manifest extension → Retest → Closed**
 
 1. **Player Report** — The player chooses the issue form that matches the problem and provides versions, exact errors, hashes, logs, and a support fingerprint when available.
 2. **GitHub Issue** — The report becomes a durable ticket that can be searched by `A8P-*` error code or `A8P-FP-*` fingerprint.
 3. **Triage** — New issues start with `needs-triage`. Automation classifies obvious launcher, multiplayer, payload, UI, paper, compatibility, engine, and auto-repair cases.
 4. **Fingerprint / error class** — Reports with the same stable fingerprint are treated as candidates for one root-cause class even if the visible wording differs.
-5. **Diagnosis** — Compare environment, file hashes, repair actions, logs, and reproduction steps. Confirm whether the problem is deterministic and whether multiple reports are true duplicates.
-6. **Fix or repair-manifest extension** — Fix source/packaging code when the defect belongs there. If the problem is safe and deterministic to repair locally, add or extend a stable repair rule.
-7. **Retest** — Reproduce the original failure, execute the fix/repair path, and verify launch plus relevant multiplayer behavior.
-8. **Closed** — Close only after the fix is verified or the report is intentionally classified as duplicate / cannot reproduce / not planned.
+5. **Master Ticket** — Exact fingerprint matches are clustered. One canonical issue stays open as `master-ticket`; individual reports remain preserved as closed `cluster-member` evidence.
+6. **Diagnosis** — Compare environment, file hashes, repair actions, logs, and reproduction steps across the entire cluster.
+7. **Fix or repair-manifest extension** — Fix source/packaging code when the defect belongs there. If the problem is safe and deterministic to repair locally, add or extend a stable repair rule.
+8. **Retest** — Reproduce the original failure, execute the fix/repair path, and ask all affected reports to verify the result.
+9. **Closed** — Close the master only after the fix is verified or the error class is intentionally resolved.
 
 ## Stable error codes
 
@@ -31,6 +32,10 @@ The existing `repair-manifest.json` is the starting vocabulary for launcher repa
 - `A8P-ENGINE-001`
 
 Do not recycle an existing ID for a materially different failure class. New stable IDs should remain machine-readable and should map to deterministic detection logic.
+
+## Ticket IDs
+
+Every GitHub issue receives a padded project reference such as `A8P-TICKET-0007`. The ticket ID identifies one individual report and is distinct from the support fingerprint.
 
 ## Support fingerprint
 
@@ -52,16 +57,23 @@ Do **not** include username, home path, IP/MAC address, machine name, Discord/Gi
 
 A future launcher implementation can hash the canonical signature (for example SHA-256) and use the first 12 uppercase hexadecimal characters.
 
-## Duplicate handling
+## Master-ticket clustering
 
-Search both the `A8P-*` code and the fingerprint before diagnosing a new report. The same fingerprint is strong duplicate evidence, but do not auto-close solely on the fingerprint if environment differences could indicate separate root causes.
+Reports with the exact same `A8P-FP-*` value are automatically grouped by `.github/workflows/issue-cluster.yml`.
 
-For a duplicate:
+- the oldest matching report becomes the master unless a master already exists;
+- the master receives `master-ticket` and stays in the active backlog;
+- later matching reports receive `cluster-member` + `duplicate` and are closed as duplicates;
+- no report is deleted: its versions, hashes, logs, repair attempts, and ticket ID remain available as evidence;
+- the master contains an automatically maintained list of all affected ticket IDs;
+- two or more matching reports automatically mark the master `confirmed`;
+- a new recurrence can reopen a previously closed master.
 
-1. link the canonical issue;
-2. preserve any new logs/hash evidence;
-3. apply `duplicate`;
-4. close with the duplicate reason.
+A maintainer may split a report back out manually if later evidence proves that an identical fingerprint was too broad and actually covered two different root causes.
+
+Maintainer comments on the master are mirrored to all clustered reports. This lets one reply such as `Should be fixed now. Please recheck.` reach every affected player report. Retest-style messages also apply `needs-retest`.
+
+Full behavior and the future launcher Messages/red-dot model are documented in [`MASTER_TICKETS.md`](MASTER_TICKETS.md).
 
 ## From manual fix to repair-manifest rule
 
@@ -77,16 +89,16 @@ A recurring manual fix becomes an auto-repair candidate only when all of the fol
 
 Implementation path:
 
-1. identify the canonical issue and stable fingerprint;
+1. identify the canonical master issue and stable fingerprint;
 2. define or reuse the `A8P-*` error code;
 3. encode deterministic detection;
 4. add the smallest safe action sequence to `repair-manifest.json`;
 5. emit each action and result into `repair_attempts`;
 6. retry only where the rule explicitly allows it;
 7. verify hashes/runtime state after repair;
-8. add regression evidence to the issue/PR;
+8. add regression evidence to the master issue/PR;
 9. release the launcher/manifest update;
-10. confirm a future reproduction repairs automatically.
+10. broadcast a retest request to the cluster and confirm future reproductions repair automatically.
 
 `protected` repair classes (for example compatibility-sensitive conditions) should remain conservative until an automatic change is proven safe.
 
@@ -110,15 +122,16 @@ The bundle can later be attached to an Auto-Repair or Multiplayer issue and pars
 
 ## Labels
 
-The canonical label catalog is versioned in `.github/labels.yml`. The `Issue Triage` workflow creates missing labels on an issue event and can also synchronize them through manual `workflow_dispatch`.
+The canonical label catalog is versioned in `.github/labels.yml`. GitHub workflows create missing labels as needed.
 
-Triage labels:
+Triage and lifecycle labels include:
 
 - `bug`, `feature`
 - `launcher`, `multiplayer`, `sync`
 - `payload`, `ui`, `paper`
 - `auto-repair`, `compatibility`, `engine`
-- `needs-triage`, `needs-logs`
+- `master-ticket`, `cluster-member`
+- `needs-triage`, `needs-logs`, `needs-retest`
 - `duplicate`, `confirmed`, `cannot-reproduce`, `fixed`
 - `priority:critical`, `priority:high`, `priority:medium`, `priority:low`
 
@@ -135,5 +148,6 @@ Priority guidance:
 - **Multiplayer / Sync Problem** — LAN, Network WotR, mismatch, OOS, `Starting...`, Direct Launch Failed, language/version/hash divergence.
 - **Auto-Repair Failure** — launcher recognized a condition but its repair plan did not recover.
 - **Feature Request** — improvements that are not defect reports.
+- **Launcher Auto-Repair Failure** — prefilled launcher handoff after Auto-Repair is exhausted.
 
 Blank issues are disabled so support data stays structured.

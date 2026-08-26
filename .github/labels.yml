@@ -1,5 +1,5 @@
 # Canonical label catalog for the AotR 8P WotR ticket system.
-# `.github/workflows/issue-triage.yml` creates missing labels automatically on issue events.
+# GitHub workflows create missing labels automatically on issue events.
 labels:
   - name: bug
     color: d73a4a
@@ -16,6 +16,15 @@ labels:
   - name: launcher-report
     color: 0366d6
     description: Report opened from the launcher after auto-repair failed
+  - name: master-ticket
+    color: 6f42c1
+    description: Canonical issue for one support fingerprint/error cluster
+  - name: cluster-member
+    color: bfd4f2
+    description: Individual report linked to a master ticket
+  - name: needs-retest
+    color: fef2c0
+    description: Maintainer asked affected players to verify a proposed fix
   - name: payload
     color: 0e8a16
     description: Packaged payload integrity or deployment
