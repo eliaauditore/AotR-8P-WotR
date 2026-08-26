@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $ExpectedSeedSha256 = '97A8163CA72BDFB5C6C24931E06B2BFCE1D0E33C382FEA2462F73BC80BD3EA9F'
-$ExpectedUiSha256   = '827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376'
+$ExpectedUiSha256 = '827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376'
 $ExpectedPaperSha256 = '3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43'
 
 $SeedName = 'AotR 8P WotR Mod.exe'
@@ -70,8 +70,6 @@ Write-Host ' READ ONLY / NO BUILD / NO COPIES' -ForegroundColor Cyan
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host "Research root: $ResearchRoot"
 
-$allRows = New-Object System.Collections.Generic.List[object]
-
 # Seed EXEs
 $seedRows = New-Object System.Collections.Generic.List[object]
 foreach ($f in @(Get-ChildItem -LiteralPath $ResearchRoot -Recurse -File -Filter $SeedName -ErrorAction SilentlyContinue)) {
@@ -80,7 +78,8 @@ foreach ($f in @(Get-ChildItem -LiteralPath $ResearchRoot -Recurse -File -Filter
         [void]$seedRows.Add([PSCustomObject]@{ Path=$f.FullName; SHA256=$h })
     } catch {}
 }
-Write-HashGroups -Title $SeedName -Rows @($seedRows) -Expected $ExpectedSeedSha256
+$seedArray = $seedRows.ToArray()
+Write-HashGroups -Title $SeedName -Rows $seedArray -Expected $ExpectedSeedSha256
 
 # Support files
 $rowsByName = @{}
@@ -95,14 +94,15 @@ foreach ($spec in $SupportSpecs) {
             [void]$rows.Add([PSCustomObject]@{ Path=$full; SHA256=$h })
         } catch {}
     }
-    $rowsByName[$spec.Name] = @($rows)
-    Write-HashGroups -Title $spec.Name -Rows @($rows) -Expected $spec.Expected
+    $rowsArray = $rows.ToArray()
+    $rowsByName[$spec.Name] = $rowsArray
+    Write-HashGroups -Title $spec.Name -Rows $rowsArray -Expected $spec.Expected
 }
 
 # Infer candidate support roots from every matched support path.
 $rootMap = @{}
 foreach ($spec in $SupportSpecs) {
-    foreach ($row in @($rowsByName[$spec.Name])) {
+    foreach ($row in $rowsByName[$spec.Name]) {
         $suffix = '\' + $spec.Relative
         if ($row.Path.EndsWith($suffix,[StringComparison]::OrdinalIgnoreCase)) {
             $root = $row.Path.Substring(0,$row.Path.Length-$suffix.Length)
@@ -144,10 +144,11 @@ foreach ($root in @($rootMap.Values | Sort-Object)) {
         })
     }
 }
+$donorArray = $donors.ToArray()
 
 Write-Host ''
 Write-Host '=== SUPPORT DONOR ROOTS ===' -ForegroundColor Cyan
-$verifiedDonors = @($donors | Where-Object VerifiedSupportDonor | Sort-Object @{Expression={$_.Root.Length};Ascending=$true}, Root)
+$verifiedDonors = @($donorArray | Where-Object VerifiedSupportDonor | Sort-Object @{Expression={$_.Root.Length};Ascending=$true}, Root)
 if ($verifiedDonors.Count -gt 0) {
     foreach ($d in $verifiedDonors) {
         Write-Host '[VERIFIED SUPPORT DONOR]' -ForegroundColor Green
@@ -161,7 +162,7 @@ if ($verifiedDonors.Count -gt 0) {
     Write-Host 'No root contains icon + skin + expected UI + expected Paper together.' -ForegroundColor Yellow
     Write-Host ''
     Write-Host 'Partial donor roots:' -ForegroundColor Yellow
-    foreach ($d in @($donors | Sort-Object Root)) {
+    foreach ($d in @($donorArray | Sort-Object Root)) {
         Write-Host ("  {0}" -f $d.Root)
         Write-Host ("    icon={0} skin={1} ui={2}/expected={3} paper={4}/expected={5}" -f $d.Icon,$d.Skin,$d.Ui,$d.UiExpected,$d.Paper,$d.PaperExpected)
     }
@@ -169,7 +170,7 @@ if ($verifiedDonors.Count -gt 0) {
 
 Write-Host ''
 Write-Host '=== RECOMMENDED NEXT INPUTS ===' -ForegroundColor Cyan
-$verifiedSeeds = @($seedRows | Where-Object { $_.SHA256 -eq $ExpectedSeedSha256 } | Sort-Object @{Expression={$_.Path.Length};Ascending=$true}, Path)
+$verifiedSeeds = @($seedArray | Where-Object { $_.SHA256 -eq $ExpectedSeedSha256 } | Sort-Object @{Expression={$_.Path.Length};Ascending=$true}, Path)
 if ($verifiedSeeds.Count -gt 0) {
     Write-Host ('Verified seed : ' + $verifiedSeeds[0].Path) -ForegroundColor Green
     Write-Host ('Seed SHA256   : ' + $verifiedSeeds[0].SHA256) -ForegroundColor Green
