@@ -36,6 +36,14 @@ D:\BFME_RESEARCH\05_REVERSE_ENGINEERING\RELEASE_1_0_9_UI_POLISH_20260822_183040
 
 That directory contains `BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V17_LAN_UI_POLISH.ps1`, strongly tying that builder variant to the public `1.0.9` release lineage. This is strong evidence, but the generated EXE ancestry still needs to be checked before calling it mathematically proven.
 
+Source inspection on 2026-08-27 also established that both the `LAN_UI_POLISH` release-source copy and `START_SIGNAL_MVP` working copy declare the same builder parameter default:
+
+```powershell
+[string]$LauncherVersion = "1.0.0"
+```
+
+Therefore the builder source's parameter default cannot be used to identify the actual produced launcher release. The public `1.0.9` version was evidently supplied externally at build invocation and/or by surrounding release tooling. This makes source lineage, release-directory evidence, hashes and generated-artifact ancestry more authoritative than that default value.
+
 ## EVIDENCE
 
 ### START_SIGNAL_MVP — working copy
@@ -128,11 +136,37 @@ CheckpointMatch: NO_KNOWN_CHECKPOINT
 
 All three observed `LAN_UI_POLISH` copies are byte-identical by SHA256.
 
+### LauncherVersion source inspection
+
+`LAN_UI_POLISH` release-source copy:
+
+```text
+line 7: [string]$LauncherVersion = "1.0.0"
+lines 17-20: numeric-version validation
+lines 2029-2030: LauncherVersion injected into generated source/template
+line 2095: launcher_version = $LauncherVersion
+line 2122: generated_for_launcher = $LauncherVersion
+```
+
+`START_SIGNAL_MVP` working copy:
+
+```text
+line 7: [string]$LauncherVersion = "1.0.0"
+lines 17-20: numeric-version validation
+lines 2110-2111: LauncherVersion injected into generated source/template
+line 2176: launcher_version = $LauncherVersion
+line 2203: generated_for_launcher = $LauncherVersion
+```
+
+Interpretation: the default is shared builder scaffolding and does not prove produced release version or branch ancestry.
+
 ## WHAT FAILED
 
-Nothing failed in this discovery run.
+Nothing failed in builder discovery.
 
-The audit did reveal that duplicate builder names are expected because checkpoint/release copies are present. Therefore file name and LastWriteTime alone are insufficient for source selection.
+The first source-comparison output did not surface the resolver sections in the pasted terminal excerpt; only the final version-marker section was captured. This is an output/presentation issue, not evidence that resolver markers are absent. The next query should print the resolver/action evidence in smaller explicit blocks.
+
+The audit also revealed that duplicate builder names are expected because checkpoint/release copies are present. Therefore file name and LastWriteTime alone are insufficient for source selection.
 
 ## CURRENT HYPOTHESIS
 
@@ -140,6 +174,8 @@ Current evidence supports two different concepts that must not be conflated:
 
 1. **Public 1.0.9 release ancestry candidate:** `LAN_UI_POLISH`, because an identical builder is stored under `RELEASE_1_0_9_UI_POLISH_20260822_183040`.
 2. **Newest known development-line candidate:** `START_SIGNAL_MVP`, because it is the newest checkpointed V17 working builder currently found and has an exact known hash.
+
+The identical `LauncherVersion = "1.0.0"` default in both builders neither proves nor disproves ancestry. It should be ignored for builder selection unless the actual build invocation is recovered.
 
 The robust autodetect integration base should be chosen only after source-level lineage comparison. If later development builders contain all current release behavior plus subsequent features, the integration base may be the newest canonical descendant rather than the historical 1.0.9 release builder.
 
@@ -166,6 +202,7 @@ Newly checkpointed `LAN_UI_POLISH` SHA256:
 - size and LastWriteTime capture;
 - checkpoint comparison;
 - duplicate-copy identification by exact SHA256;
+- read-only source search for version markers;
 - no launcher, builder, game, registry, config, or payload files modified by the audit.
 
 ## NEXT PRACTICAL ACTION
@@ -175,16 +212,14 @@ Inspect source markers in both:
 1. the `LAN_UI_POLISH` release-1.0.9 copy;
 2. the `START_SIGNAL_MVP` working copy.
 
-For each, capture:
+Print these in compact, separate blocks rather than one large terminal dump:
 
 ```text
-embedded launcher version
-GUI AotR resolver
-engine AotR resolver
-config load/save logic
-runtime/source_mod/game.dat construction
-repair-manifest action dispatcher/allowlist
-reporting/ticket integration markers
+candidate resolver functions
+AOTR_HOME / AgeoftheRing / lotrbfme2ep1.exe hits
+runtime / game.dat / zGameDats hits
+repair action occurrences and enclosing functions
+config markers
 ```
 
 Then compare the two source variants to establish ancestry and select the canonical integration base.
@@ -194,6 +229,7 @@ Then compare the two source variants to establish ancestry and select the canoni
 - Do not treat `AUTODETECT_SOURCE_CHECKPOINT_20260827_000809` as the live builder workspace.
 - Do not choose a builder because it is merely the newest file.
 - Do not assume the public 1.0.9 source and newest development source are the same thing.
+- Do not use the builder's default `LauncherVersion = "1.0.0"` as release identification.
 - Do not edit any of the checkpoint/release copies.
 - Do not patch the public EXE to test resolver ideas.
 - Do not integrate robust autodetect until both GUI and engine resolver locations are proven in the chosen builder.
@@ -202,4 +238,5 @@ Then compare the two source variants to establish ancestry and select the canoni
 
 - `LAN_UI_POLISH` is strongly associated with release 1.0.9 by directory naming and byte-identical source, but generated-EXE ancestry has not yet been independently verified.
 - `START_SIGNAL_MVP` may be a newer experimental/development descendant; exact feature ancestry relative to public 1.0.9 still needs source comparison.
+- the actual invocation that supplied `LauncherVersion = 1.0.9` has not yet been recovered.
 - the internal repair dispatcher/allowlist is still unproven until the builder inspection is completed.
