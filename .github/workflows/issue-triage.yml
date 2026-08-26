@@ -9,13 +9,6 @@ permissions:
   contents: read
   issues: write
 
-# One repository-wide queue for issue mutations. Triage + fingerprinting +
-# clustering deliberately live in this single workflow so two independent
-# workflows cannot race or cancel each other while editing the same cluster.
-concurrency:
-  group: a8p-issue-processing
-  cancel-in-progress: false
-
 jobs:
   triage:
     runs-on: ubuntu-latest
@@ -111,7 +104,7 @@ jobs:
               return `${source.trimEnd()}\n\n${block}\n`;
             };
 
-            // Always read fresh server state instead of trusting the event snapshot.
+            // Read fresh server state instead of trusting the event snapshot.
             const { data: issue } = await github.rest.issues.get({
               owner,
               repo,
@@ -125,7 +118,7 @@ jobs:
             const fingerprint = resolveFingerprint(body);
 
             // Stable ticket metadata. If the launcher omitted a fingerprint, the
-            // fallback generated above is written into the report before clustering.
+            // fallback generated above is written before clustering.
             const metadataMarker = "<!-- a8p-ticket-metadata -->";
             let desiredBody = body;
             if (!desiredBody.includes(metadataMarker)) {
@@ -202,14 +195,15 @@ jobs:
               labels: [...add]
             });
 
-            // Reports without a stable fingerprint cannot be safely clustered.
             if (!fingerprint) {
               core.info(`Processed ${currentTicketId}; no stable fingerprint available for clustering.`);
               return;
             }
 
-            // One fingerprint = one canonical master. Every report remains preserved,
-            // but only the master stays in the normal open backlog.
+            // No repository-wide Actions concurrency group is used here. GitHub may
+            // discard intermediate pending runs in a shared concurrency group during
+            // report bursts. Instead every report runs, and clustering converges on
+            // the deterministic oldest issue number for this fingerprint.
             const allItems = await github.paginate(github.rest.issues.listForRepo, {
               owner,
               repo,
@@ -234,7 +228,6 @@ jobs:
             await github.rest.issues.addLabels({ owner, repo, issue_number: master.number, labels: ["master-ticket"] });
             await removeLabel(master.number, "cluster-member");
             await removeLabel(master.number, "duplicate");
-
             for (const extraMaster of existingMasters.slice(1)) await removeLabel(extraMaster.number, "master-ticket");
 
             if (
@@ -249,31 +242,47 @@ jobs:
             }
 
             candidates = [...candidates].sort((a, b) => a.number - b.number);
-            const clusterRows = candidates.map(item => {
-              const role = item.number === master.number ? " **MASTER**" : " report";
-              return `- \`${ticketId(item.number)}\` — #${item.number}${role}`;
-            });
 
+            // Build the visible cluster from the fresh master state plus all reports
+            // observed by this run. Unioning prior rows makes concurrent runs
+            // monotonic: a slower earlier run cannot shrink a newer cluster block.
             const clusterStart = "<!-- a8p-cluster-start -->";
             const clusterEnd = "<!-- a8p-cluster-end -->";
+            const { data: freshMaster } = await github.rest.issues.get({ owner, repo, issue_number: master.number });
+            const clusterNumbers = new Set(candidates.map(item => item.number));
+            clusterNumbers.add(master.number);
+
+            const existingBlockStart = (freshMaster.body || "").indexOf(clusterStart);
+            const existingBlockEnd = (freshMaster.body || "").indexOf(clusterEnd);
+            if (existingBlockStart !== -1 && existingBlockEnd > existingBlockStart) {
+              const existingBlock = (freshMaster.body || "").slice(existingBlockStart, existingBlockEnd + clusterEnd.length);
+              for (const match of existingBlock.matchAll(/A8P-TICKET-([0-9]{4,})/g)) {
+                clusterNumbers.add(Number(match[1]));
+              }
+            }
+
+            const sortedClusterNumbers = [...clusterNumbers].sort((a, b) => a - b);
+            const clusterRows = sortedClusterNumbers.map(number => {
+              const role = number === master.number ? " **MASTER**" : " report";
+              return `- \`${ticketId(number)}\` — #${number}${role}`;
+            });
             const clusterBlock = [
               clusterStart,
               "### Error cluster",
               `- **Master:** \`${masterId}\` (#${master.number})`,
               `- **Fingerprint:** \`${fingerprint}\``,
-              `- **Affected reports:** ${candidates.length}`,
+              `- **Affected reports:** ${sortedClusterNumbers.length}`,
               "",
               ...clusterRows,
               clusterEnd
             ].join("\n");
 
-            const { data: freshMaster } = await github.rest.issues.get({ owner, repo, issue_number: master.number });
             const newMasterBody = upsertBlock(freshMaster.body, clusterStart, clusterEnd, clusterBlock);
             if (newMasterBody !== (freshMaster.body || "")) {
               await github.rest.issues.update({ owner, repo, issue_number: master.number, body: newMasterBody });
             }
 
-            if (candidates.length >= 2) {
+            if (sortedClusterNumbers.length >= 2) {
               await github.rest.issues.addLabels({ owner, repo, issue_number: master.number, labels: ["confirmed"] });
             }
 
@@ -281,38 +290,25 @@ jobs:
               if (item.number === master.number) continue;
 
               const { data: child } = await github.rest.issues.get({ owner, repo, issue_number: item.number });
-              const childId = ticketId(child.number);
 
-              // Ensure older reports that were clustered before metadata existed also
-              // get their stable ticket/fingerprint header during any later cluster pass.
-              let childBody = child.body || "";
-              if (!childBody.includes(metadataMarker)) {
-                const childMetadata = [
-                  metadataMarker,
-                  `**Ticket ID:** \`${childId}\``,
-                  `**Support Fingerprint:** \`${fingerprint}\``,
-                  ""
-                ].join("  \n");
-                childBody = `${childMetadata}\n${childBody}`;
-              } else if (!/\bA8P-FP-[A-F0-9]{12}\b/i.test(childBody)) {
-                childBody = childBody.replace(
-                  /\*\*Ticket ID:\*\*\s*`A8P-TICKET-[0-9]{4,}`/i,
-                  match => `${match}  \n**Support Fingerprint:** \`${fingerprint}\``
-                );
-              }
+              // Only a report's own workflow run edits its report body. This avoids
+              // cross-report body write races while still allowing any run to apply
+              // cluster lifecycle labels/closure.
+              if (child.number === issue.number) {
+                let childBody = child.body || "";
+                const linkStart = "<!-- a8p-master-link-start -->";
+                const linkEnd = "<!-- a8p-master-link-end -->";
+                const linkBlock = [
+                  linkStart,
+                  `> Clustered under master **${masterId}**: ${masterUrl}`,
+                  `> Fingerprint: \`${fingerprint}\`. Maintainer updates from the master are mirrored to this report.`,
+                  linkEnd
+                ].join("\n");
+                childBody = upsertBlock(childBody, linkStart, linkEnd, linkBlock);
 
-              const linkStart = "<!-- a8p-master-link-start -->";
-              const linkEnd = "<!-- a8p-master-link-end -->";
-              const linkBlock = [
-                linkStart,
-                `> Clustered under master **${masterId}**: ${masterUrl}`,
-                `> Fingerprint: \`${fingerprint}\`. Maintainer updates from the master are mirrored to this report.`,
-                linkEnd
-              ].join("\n");
-              childBody = upsertBlock(childBody, linkStart, linkEnd, linkBlock);
-
-              if (childBody !== (child.body || "")) {
-                await github.rest.issues.update({ owner, repo, issue_number: child.number, body: childBody });
+                if (childBody !== (child.body || "")) {
+                  await github.rest.issues.update({ owner, repo, issue_number: child.number, body: childBody });
+                }
               }
 
               await github.rest.issues.addLabels({
@@ -350,4 +346,4 @@ jobs:
               await removeLabel(child.number, "needs-triage");
             }
 
-            core.info(`Processed ${currentTicketId}; cluster ${fingerprint}: master ${masterId}, ${candidates.length} affected report(s).`);
+            core.info(`Processed ${currentTicketId}; cluster ${fingerprint}: master ${masterId}, at least ${sortedClusterNumbers.length} affected report(s).`);
