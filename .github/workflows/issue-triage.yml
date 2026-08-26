@@ -9,6 +9,9 @@ permissions:
   contents: read
   issues: write
 
+# One repository-wide queue for issue mutations. Triage + fingerprinting +
+# clustering deliberately live in this single workflow so two independent
+# workflows cannot race or cancel each other while editing the same cluster.
 concurrency:
   group: a8p-issue-processing
   cancel-in-progress: false
@@ -17,11 +20,12 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
-      - name: Ensure labels, assign ticket metadata, and classify issue
+      - name: Triage, fingerprint, and cluster issue
         uses: actions/github-script@v8
         with:
           script: |
             const crypto = require("crypto");
+            const { owner, repo } = context.repo;
 
             const labels = {
               "bug": ["d73a4a", "Confirmed or suspected defect"],
@@ -51,8 +55,6 @@ jobs:
               "priority:low": ["0e8a16", "Minor impact or low urgency"]
             };
 
-            const { owner, repo } = context.repo;
-
             for (const [name, [color, description]] of Object.entries(labels)) {
               try {
                 await github.rest.issues.getLabel({ owner, repo, name });
@@ -63,50 +65,73 @@ jobs:
             }
 
             if (!context.payload.issue) {
-              core.info("Label catalog synchronized; no issue payload to classify.");
+              core.info("Label catalog synchronized; no issue payload to process.");
               return;
             }
 
+            const ticketId = number => `A8P-TICKET-${String(number).padStart(4, "0")}`;
+            const labelNames = item => (item.labels || []).map(label => typeof label === "string" ? label : label.name);
+
+            const resolveFingerprint = text => {
+              const source = text || "";
+              const direct = source.match(/\bA8P-FP-[A-F0-9]{12}\b/i);
+              if (direct) return direct[0].toUpperCase();
+
+              const errorCodeMatch = source.match(/\bA8P-(?!FP-)[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b/i);
+              const errorSectionMatch = source.match(/###\s+(?:Exact error(?: \/ visible state)?|Exact error message|Original error)\s*\n+([\s\S]*?)(?=\n###\s|\s*$)/i);
+              if (!errorCodeMatch || !errorSectionMatch) return null;
+
+              const normalizedError = errorSectionMatch[1]
+                .replace(/```(?:text)?/gi, "")
+                .replace(/```/g, "")
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, " ");
+              if (!normalizedError) return null;
+
+              const signature = `${errorCodeMatch[0].toUpperCase()}|${normalizedError}`;
+              return `A8P-FP-${crypto.createHash("sha256").update(signature, "utf8").digest("hex").slice(0, 12).toUpperCase()}`;
+            };
+
+            const removeLabel = async (issueNumber, label) => {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: label });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            };
+
+            const upsertBlock = (body, start, end, block) => {
+              const source = body || "";
+              const startIndex = source.indexOf(start);
+              const endIndex = source.indexOf(end);
+              if (startIndex !== -1 && endIndex !== -1 && endIndex >= startIndex) {
+                return `${source.slice(0, startIndex)}${block}${source.slice(endIndex + end.length)}`;
+              }
+              return `${source.trimEnd()}\n\n${block}\n`;
+            };
+
+            // Always read fresh server state instead of trusting the event snapshot.
             const { data: issue } = await github.rest.issues.get({
               owner,
               repo,
               issue_number: context.payload.issue.number
             });
-
             if (issue.pull_request) return;
 
             const title = issue.title || "";
             let body = issue.body || "";
-            const ticketId = `A8P-TICKET-${String(issue.number).padStart(4, "0")}`;
+            const currentTicketId = ticketId(issue.number);
+            const fingerprint = resolveFingerprint(body);
 
-            let fingerprintMatch = body.match(/\bA8P-FP-[A-F0-9]{12}\b/i);
-            let fingerprint = fingerprintMatch ? fingerprintMatch[0].toUpperCase() : null;
-
-            if (!fingerprint) {
-              const errorCodeMatch = body.match(/\bA8P-(?!FP-)[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b/i);
-              const errorSectionMatch = body.match(/###\s+(?:Exact error(?: \/ visible state)?|Exact error message|Original error)\s*\n+([\s\S]*?)(?=\n###\s|\s*$)/i);
-
-              if (errorCodeMatch && errorSectionMatch) {
-                const normalizedError = errorSectionMatch[1]
-                  .replace(/```(?:text)?/gi, "")
-                  .replace(/```/g, "")
-                  .trim()
-                  .toLowerCase()
-                  .replace(/\s+/g, " ");
-
-                if (normalizedError) {
-                  const signature = `${errorCodeMatch[0].toUpperCase()}|${normalizedError}`;
-                  fingerprint = `A8P-FP-${crypto.createHash("sha256").update(signature, "utf8").digest("hex").slice(0, 12).toUpperCase()}`;
-                }
-              }
-            }
-
+            // Stable ticket metadata. If the launcher omitted a fingerprint, the
+            // fallback generated above is written into the report before clustering.
             const metadataMarker = "<!-- a8p-ticket-metadata -->";
             let desiredBody = body;
             if (!desiredBody.includes(metadataMarker)) {
               const metadata = [
                 metadataMarker,
-                `**Ticket ID:** \`${ticketId}\``,
+                `**Ticket ID:** \`${currentTicketId}\``,
                 fingerprint ? `**Support Fingerprint:** \`${fingerprint}\`` : null,
                 ""
               ].filter(value => value !== null).join("  \n");
@@ -119,15 +144,11 @@ jobs:
             }
 
             if (desiredBody !== body) {
-              await github.rest.issues.update({
-                owner,
-                repo,
-                issue_number: issue.number,
-                body: desiredBody
-              });
+              await github.rest.issues.update({ owner, repo, issue_number: issue.number, body: desiredBody });
               body = desiredBody;
             }
 
+            // Normal issue classification happens before clustering.
             const haystack = `${title}\n${body}`;
             const add = new Set(["needs-triage"]);
 
@@ -151,9 +172,7 @@ jobs:
               add.add("auto-repair");
               add.add("launcher-report");
             }
-            if (title.startsWith("[Feature]")) {
-              add.add("feature");
-            }
+            if (title.startsWith("[Feature]")) add.add("feature");
 
             if (/A8P-PAYLOAD-UI-[A-Z0-9-]*/i.test(haystack)) {
               add.add("payload");
@@ -163,39 +182,18 @@ jobs:
               add.add("payload");
               add.add("paper");
             }
-            if (/A8P-COMPAT-[A-Z0-9-]*/i.test(haystack)) {
-              add.add("compatibility");
-            }
-            if (/A8P-ENGINE-[A-Z0-9-]*/i.test(haystack)) {
-              add.add("engine");
-            }
-            if (/A8P-(INSTALL|LEGACY|PROCESS|RUNTIME|GAMEPROC|PERMISSION)-[A-Z0-9-]*/i.test(haystack)) {
-              add.add("launcher");
-            }
+            if (/A8P-COMPAT-[A-Z0-9-]*/i.test(haystack)) add.add("compatibility");
+            if (/A8P-ENGINE-[A-Z0-9-]*/i.test(haystack)) add.add("engine");
+            if (/A8P-(INSTALL|LEGACY|PROCESS|RUNTIME|GAMEPROC|PERMISSION)-[A-Z0-9-]*/i.test(haystack)) add.add("launcher");
 
             if (/\bmismatch\b|out[ -]?of[ -]?sync|\boos\b|starting\.\.\.|direct launch failed|host\/client|network wotr|\blan\b/i.test(haystack)) {
               add.add("multiplayer");
               add.add("sync");
             }
 
-            const hasFingerprint = Boolean(fingerprint) || /\bA8P-FP-[A-F0-9]{12}\b/i.test(body);
             const hasSupportBundle = /"schema"\s*:\s*1/i.test(body) && /"repair_attempts"\s*:/i.test(body);
-
-            if (!hasFingerprint && (add.has("auto-repair") || add.has("multiplayer"))) {
-              add.add("needs-logs");
-            }
-            if (add.has("launcher-report") && !hasSupportBundle) {
-              add.add("needs-logs");
-            }
-
-            const { data: latest } = await github.rest.issues.get({
-              owner,
-              repo,
-              issue_number: issue.number
-            });
-            const latestLabels = (latest.labels || []).map(label => typeof label === "string" ? label : label.name);
-            const isClusterChild = latestLabels.includes("cluster-member") || latestLabels.includes("duplicate");
-            if (isClusterChild) add.delete("needs-triage");
+            if (!fingerprint && (add.has("auto-repair") || add.has("multiplayer"))) add.add("needs-logs");
+            if (add.has("launcher-report") && !hasSupportBundle) add.add("needs-logs");
 
             await github.rest.issues.addLabels({
               owner,
@@ -204,12 +202,152 @@ jobs:
               labels: [...add]
             });
 
-            if (isClusterChild) {
-              try {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number: issue.number, name: "needs-triage" });
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
+            // Reports without a stable fingerprint cannot be safely clustered.
+            if (!fingerprint) {
+              core.info(`Processed ${currentTicketId}; no stable fingerprint available for clustering.`);
+              return;
             }
 
-            core.info(`Assigned ${ticketId}${fingerprint ? ` / ${fingerprint}` : ""}${isClusterChild ? " / clustered child" : ""}`);
+            // One fingerprint = one canonical master. Every report remains preserved,
+            // but only the master stays in the normal open backlog.
+            const allItems = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: "all",
+              per_page: 100
+            });
+
+            let candidates = allItems
+              .filter(item => !item.pull_request)
+              .filter(item => resolveFingerprint(item.body) === fingerprint);
+
+            if (!candidates.some(item => item.number === issue.number)) candidates.push(issue);
+
+            const existingMasters = candidates
+              .filter(item => labelNames(item).includes("master-ticket"))
+              .sort((a, b) => a.number - b.number);
+
+            const master = existingMasters[0] || [...candidates].sort((a, b) => a.number - b.number)[0];
+            const masterId = ticketId(master.number);
+            const masterUrl = `https://github.com/${owner}/${repo}/issues/${master.number}`;
+
+            await github.rest.issues.addLabels({ owner, repo, issue_number: master.number, labels: ["master-ticket"] });
+            await removeLabel(master.number, "cluster-member");
+            await removeLabel(master.number, "duplicate");
+
+            for (const extraMaster of existingMasters.slice(1)) await removeLabel(extraMaster.number, "master-ticket");
+
+            if (
+              master.state === "closed" &&
+              issue.number !== master.number &&
+              issue.state === "open" &&
+              ["opened", "reopened"].includes(context.payload.action)
+            ) {
+              await github.rest.issues.update({ owner, repo, issue_number: master.number, state: "open" });
+              await removeLabel(master.number, "fixed");
+              await github.rest.issues.addLabels({ owner, repo, issue_number: master.number, labels: ["needs-triage"] });
+            }
+
+            candidates = [...candidates].sort((a, b) => a.number - b.number);
+            const clusterRows = candidates.map(item => {
+              const role = item.number === master.number ? " **MASTER**" : " report";
+              return `- \`${ticketId(item.number)}\` — #${item.number}${role}`;
+            });
+
+            const clusterStart = "<!-- a8p-cluster-start -->";
+            const clusterEnd = "<!-- a8p-cluster-end -->";
+            const clusterBlock = [
+              clusterStart,
+              "### Error cluster",
+              `- **Master:** \`${masterId}\` (#${master.number})`,
+              `- **Fingerprint:** \`${fingerprint}\``,
+              `- **Affected reports:** ${candidates.length}`,
+              "",
+              ...clusterRows,
+              clusterEnd
+            ].join("\n");
+
+            const { data: freshMaster } = await github.rest.issues.get({ owner, repo, issue_number: master.number });
+            const newMasterBody = upsertBlock(freshMaster.body, clusterStart, clusterEnd, clusterBlock);
+            if (newMasterBody !== (freshMaster.body || "")) {
+              await github.rest.issues.update({ owner, repo, issue_number: master.number, body: newMasterBody });
+            }
+
+            if (candidates.length >= 2) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: master.number, labels: ["confirmed"] });
+            }
+
+            for (const item of candidates) {
+              if (item.number === master.number) continue;
+
+              const { data: child } = await github.rest.issues.get({ owner, repo, issue_number: item.number });
+              const childId = ticketId(child.number);
+
+              // Ensure older reports that were clustered before metadata existed also
+              // get their stable ticket/fingerprint header during any later cluster pass.
+              let childBody = child.body || "";
+              if (!childBody.includes(metadataMarker)) {
+                const childMetadata = [
+                  metadataMarker,
+                  `**Ticket ID:** \`${childId}\``,
+                  `**Support Fingerprint:** \`${fingerprint}\``,
+                  ""
+                ].join("  \n");
+                childBody = `${childMetadata}\n${childBody}`;
+              } else if (!/\bA8P-FP-[A-F0-9]{12}\b/i.test(childBody)) {
+                childBody = childBody.replace(
+                  /\*\*Ticket ID:\*\*\s*`A8P-TICKET-[0-9]{4,}`/i,
+                  match => `${match}  \n**Support Fingerprint:** \`${fingerprint}\``
+                );
+              }
+
+              const linkStart = "<!-- a8p-master-link-start -->";
+              const linkEnd = "<!-- a8p-master-link-end -->";
+              const linkBlock = [
+                linkStart,
+                `> Clustered under master **${masterId}**: ${masterUrl}`,
+                `> Fingerprint: \`${fingerprint}\`. Maintainer updates from the master are mirrored to this report.`,
+                linkEnd
+              ].join("\n");
+              childBody = upsertBlock(childBody, linkStart, linkEnd, linkBlock);
+
+              if (childBody !== (child.body || "")) {
+                await github.rest.issues.update({ owner, repo, issue_number: child.number, body: childBody });
+              }
+
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: child.number,
+                labels: ["cluster-member", "duplicate"]
+              });
+              await removeLabel(child.number, "master-ticket");
+              await removeLabel(child.number, "needs-triage");
+
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: child.number,
+                per_page: 100
+              });
+              if (!comments.some(comment => (comment.body || "").includes("<!-- a8p-cluster-link -->"))) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: child.number,
+                  body: [
+                    "<!-- a8p-cluster-link -->",
+                    `This report is part of the same error class as **${masterId}** (#${master.number}).`,
+                    "All maintainer updates on the master ticket will be mirrored here automatically.",
+                    `Master: ${masterUrl}`
+                  ].join("\n\n")
+                });
+              }
+
+              if (child.state !== "closed") {
+                await github.rest.issues.update({ owner, repo, issue_number: child.number, state: "closed" });
+              }
+              await removeLabel(child.number, "needs-triage");
+            }
+
+            core.info(`Processed ${currentTicketId}; cluster ${fingerprint}: master ${masterId}, ${candidates.length} affected report(s).`);
