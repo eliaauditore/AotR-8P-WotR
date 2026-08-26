@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: AotR 8P WotR documentation
+    url: https://github.com/eliaauditore/AotR-8P-WotR
+    about: Check the repository documentation before opening a ticket.
