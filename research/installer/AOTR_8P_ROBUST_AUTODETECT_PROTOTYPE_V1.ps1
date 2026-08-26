@@ -7,14 +7,22 @@ This script only reads filesystem/environment state and prints discovery results
 It does NOT write config, registry, launcher, game, mod, runtime, or temporary files.
 It intentionally does not modify repair-manifest.json or execute repair actions.
 
+Production-order model:
+  1. fast-validate cached canonical AotR root
+  2. validate explicit AOTR_HOME override
+  3. launcher/install environment
+  4. known paths on normal local Fixed drives
+  5. bounded AgeoftheRing search on normal local Fixed drives
+  6. removable / USB-hinted / exFAT local drives
+  7. validate, deduplicate, score and rank all discovered candidates
+
+A valid cached root is the normal fast path. Use -AuditAllCandidates only when research
+requires a full scan even though a valid cache or AOTR_HOME already exists.
+
 Hard-valid standalone root:
   <root>\rotwk\lotrbfme2ep1.exe
   <root>\rotwk\game.dat OR <root>\rotwk\zGameDats\game.dat
   <root>\aotr\
-
-The script collects all candidates, canonicalizes/deduplicates them, validates them,
-scores them, rejects/deprioritizes unsafe path classes, and reports whether automatic
-selection would be unambiguous.
 #>
 
 [CmdletBinding()]
@@ -30,6 +38,8 @@ param(
 
     [ValidateRange(100, 50000)]
     [int]$MaxDirectoriesPerDrive = 8000,
+
+    [switch]$AuditAllCandidates,
 
     [switch]$AsJson
 )
@@ -102,9 +112,9 @@ function Add-Candidate {
     $key = $root.ToLowerInvariant()
     if (-not $script:CandidateMap.ContainsKey($key)) {
         $script:CandidateMap[$key] = [ordered]@{
-            Root        = $root
-            Sources     = New-Object System.Collections.ArrayList
-            DriveClass  = $DriveClass
+            Root       = $root
+            Sources    = New-Object System.Collections.ArrayList
+            DriveClass = $DriveClass
         }
     }
 
@@ -126,12 +136,12 @@ function Get-PathClassification {
     $autoEligible = $true
 
     $segmentPatterns = @(
-        @{ Name = 'Runtime';     Pattern = '(?i)(^|[\\/])_AotR8P_WotR_Runtime([\\/]|$)'; Penalty = -1000; HardReject = $true;  AutoEligible = $false },
-        @{ Name = 'AllInOne';    Pattern = '(?i)(^|[\\/])[^\\/]*all[ _-]*in[ _-]*one[^\\/]*([\\/]|$)'; Penalty = -1000; HardReject = $true; AutoEligible = $false },
-        @{ Name = 'Research';    Pattern = '(?i)(^|[\\/])BFME_RESEARCH([\\/]|$)'; Penalty = -80; HardReject = $false; AutoEligible = $false },
-        @{ Name = 'Backup';      Pattern = '(?i)(^|[\\/])[^\\/]*backup[^\\/]*([\\/]|$)'; Penalty = -60; HardReject = $false; AutoEligible = $false },
-        @{ Name = 'Checkpoint';  Pattern = '(?i)(^|[\\/])[^\\/]*checkpoint[^\\/]*([\\/]|$)'; Penalty = -50; HardReject = $false; AutoEligible = $false },
-        @{ Name = 'Temp';        Pattern = '(?i)(^|[\\/])(temp|tmp)([\\/]|$)'; Penalty = -40; HardReject = $false; AutoEligible = $false }
+        @{ Name = 'Runtime';    Pattern = '(?i)(^|[\\/])_AotR8P_WotR_Runtime([\\/]|$)'; Penalty = -1000; HardReject = $true;  AutoEligible = $false },
+        @{ Name = 'AllInOne';   Pattern = '(?i)(^|[\\/])[^\\/]*all[ _-]*in[ _-]*one[^\\/]*([\\/]|$)'; Penalty = -1000; HardReject = $true; AutoEligible = $false },
+        @{ Name = 'Research';   Pattern = '(?i)(^|[\\/])BFME_RESEARCH([\\/]|$)'; Penalty = -80; HardReject = $false; AutoEligible = $false },
+        @{ Name = 'Backup';     Pattern = '(?i)(^|[\\/])[^\\/]*backup[^\\/]*([\\/]|$)'; Penalty = -60; HardReject = $false; AutoEligible = $false },
+        @{ Name = 'Checkpoint'; Pattern = '(?i)(^|[\\/])[^\\/]*checkpoint[^\\/]*([\\/]|$)'; Penalty = -50; HardReject = $false; AutoEligible = $false },
+        @{ Name = 'Temp';       Pattern = '(?i)(^|[\\/])(temp|tmp)([\\/]|$)'; Penalty = -40; HardReject = $false; AutoEligible = $false }
     )
 
     foreach ($rule in $segmentPatterns) {
@@ -208,57 +218,120 @@ function Test-AotrStandaloneRoot {
     }
 
     [pscustomobject]@{
-        Root                   = $Root
-        Sources                = @($Sources)
-        DriveClass             = $DriveClass
-        HardValid              = [bool]$hardValid
-        AutoEligible           = [bool]$autoEligible
-        Score                  = [int]$score
-        PathFlags              = @($classification.Flags)
-        PathPenalty            = [int]$classification.Penalty
-        HardRejectedPath       = [bool]$classification.HardReject
-        MissingRequired        = @($missing)
-        HasLotrBfme2Ep1Exe     = [bool]$hasExe
-        HasGameDatPrimary      = [bool]$hasGameDatPrimary
-        HasGameDatZGameDats    = [bool]$hasGameDatZG
-        HasAotrDirectory       = [bool]$hasAotr
-        HasAotrLauncher        = [bool]$hasLauncher
-        HasAotrIni             = [bool]$hasIni
-        HasChangelist          = [bool]$hasChangelist
-        ChangelistPreview      = $changelistPreview
-        Runtime                = $rotwk
-        SourceMod              = $aotr
-        GameDat                = $selectedGameDat
-        Writeability           = 'NOT_TESTED_READ_ONLY_PROTOTYPE'
+        Root                = $Root
+        Sources             = @($Sources)
+        DriveClass          = $DriveClass
+        HardValid           = [bool]$hardValid
+        AutoEligible        = [bool]$autoEligible
+        Score               = [int]$score
+        PathFlags           = @($classification.Flags)
+        PathPenalty         = [int]$classification.Penalty
+        HardRejectedPath    = [bool]$classification.HardReject
+        MissingRequired     = @($missing)
+        HasLotrBfme2Ep1Exe  = [bool]$hasExe
+        HasGameDatPrimary   = [bool]$hasGameDatPrimary
+        HasGameDatZGameDats = [bool]$hasGameDatZG
+        HasAotrDirectory    = [bool]$hasAotr
+        HasAotrLauncher     = [bool]$hasLauncher
+        HasAotrIni          = [bool]$hasIni
+        HasChangelist       = [bool]$hasChangelist
+        ChangelistPreview   = $changelistPreview
+        Runtime             = $rotwk
+        SourceMod           = $aotr
+        GameDat             = $selectedGameDat
+        Writeability        = 'NOT_TESTED_READ_ONLY_PROTOTYPE'
     }
+}
+
+function New-SuggestedConfigV2 {
+    param([object]$Candidate)
+
+    if (-not $Candidate) { return $null }
+
+    [ordered]@{
+        schema            = 2
+        aotr_root         = $Candidate.Root
+        runtime           = $Candidate.Runtime
+        source_mod        = $Candidate.SourceMod
+        game_dat          = $Candidate.GameDat
+        validation        = 'aotr-standalone-v2'
+        score             = $Candidate.Score
+        last_verified_utc = ''
+    }
+}
+
+function Write-PrototypeResult {
+    param(
+        [object]$Result,
+        [bool]$Json
+    )
+
+    if ($Json) {
+        $Result | ConvertTo-Json -Depth 9
+    }
+    else {
+        $Result
+    }
+}
+
+function Get-UsbRootHints {
+    $roots = New-Object System.Collections.ArrayList
+
+    # Windows Storage module hint. Read-only and optional.
+    try {
+        if (Get-Command Get-Disk -ErrorAction SilentlyContinue) {
+            foreach ($disk in Get-Disk -ErrorAction SilentlyContinue | Where-Object { $_.BusType -eq 'USB' }) {
+                foreach ($partition in $disk | Get-Partition -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter }) {
+                    $root = ('{0}:\' -f $partition.DriveLetter)
+                    if (-not $roots.Contains($root)) { [void]$roots.Add($root) }
+                }
+            }
+        }
+    }
+    catch { }
+
+    return @($roots)
 }
 
 function Get-LocalDrivesByClass {
     $items = New-Object System.Collections.ArrayList
+    $usbRoots = @(Get-UsbRootHints)
 
     foreach ($drive in [System.IO.DriveInfo]::GetDrives()) {
         try {
             if (-not $drive.IsReady) { continue }
 
-            $class = switch ($drive.DriveType) {
-                ([System.IO.DriveType]::Fixed)     { 'Fixed'; break }
-                ([System.IO.DriveType]::Removable) { 'Removable'; break }
-                default { $null }
+            $format = $drive.DriveFormat
+            $root = $drive.RootDirectory.FullName
+            $isUsbHint = $usbRoots -contains $root
+            $isExFat = ($format -ieq 'exFAT')
+            $class = $null
+
+            if ($drive.DriveType -eq [System.IO.DriveType]::Removable -or $isUsbHint -or $isExFat) {
+                $class = 'RemovableUsbOrExFat'
+            }
+            elseif ($drive.DriveType -eq [System.IO.DriveType]::Fixed) {
+                $class = 'Fixed'
             }
 
             if (-not $class) { continue }
 
             [void]$items.Add([pscustomobject]@{
-                Root       = $drive.RootDirectory.FullName
+                Root       = $root
                 DriveClass = $class
-                Format     = $drive.DriveFormat
+                Format     = $format
                 Label      = $drive.VolumeLabel
+                UsbHint    = [bool]$isUsbHint
             })
         }
         catch { }
     }
 
-    return @($items | Sort-Object @{ Expression = { if ($_.DriveClass -eq 'Fixed') { 0 } else { 1 } } }, Root)
+    return @(
+        $items | Sort-Object -Property `
+            @{ Expression = { if ($_.DriveClass -eq 'Fixed') { 0 } else { 1 } } }, `
+            @{ Expression = 'Root' }
+    )
 }
 
 function Add-KnownDriveCandidates {
@@ -322,51 +395,147 @@ function Find-AgeOfTheRingDirectories {
             }
 
             $classification = Get-PathClassification $child
-            if ($classification.HardReject) {
-                continue
-            }
+            if ($classification.HardReject) { continue }
 
             $queue.Enqueue([pscustomobject]@{
-                Path = $child
+                Path  = $child
                 Depth = $node.Depth + 1
             })
         }
     }
 
     [pscustomobject]@{
-        StartRoot = $StartRoot
-        DriveClass = $DriveClass
+        StartRoot         = $StartRoot
+        DriveClass        = $DriveClass
         VisitedDirectories = $visited
-        Limit = $MaxDirectories
-        MaxDepth = $MaxDepth
+        Limit             = $MaxDirectories
+        MaxDepth          = $MaxDepth
     }
 }
 
-# 1. Cached canonical root, if supplied.
+function New-FinalOutput {
+    param(
+        [string]$Status,
+        [string]$ErrorCode,
+        [string]$RecoveryCode,
+        [string]$CachedPathState,
+        [string]$DiscoveryMode,
+        [object]$Selected,
+        [object[]]$AmbiguityCandidates,
+        [object[]]$Candidates,
+        [object[]]$SearchStats,
+        [object[]]$Drives
+    )
+
+    [pscustomobject]@{
+        Prototype           = 'AOTR_8P_ROBUST_AUTODETECT_PROTOTYPE_V1'
+        ReadOnly            = $true
+        Status              = $Status
+        ErrorCode           = $ErrorCode
+        RecoveryCode        = $RecoveryCode
+        CachedPathState     = $CachedPathState
+        DiscoveryMode       = $DiscoveryMode
+        Selected            = $Selected
+        AmbiguityCandidates = @($AmbiguityCandidates)
+        SuggestedConfigV2   = New-SuggestedConfigV2 -Candidate $Selected
+        Candidates          = @($Candidates)
+        SearchStats         = @($SearchStats)
+        Drives              = @($Drives)
+        Safety              = [pscustomobject]@{
+            NetworkRecursiveScan = $false
+            WritesFiles          = $false
+            WritesRegistry       = $false
+            ModifiesLauncher     = $false
+            ModifiesGame         = $false
+            ExecutesRepairActions = $false
+            WriteabilityTest     = 'NOT_PERFORMED'
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 1. Cached canonical root: production fast path.
+# ---------------------------------------------------------------------------
 $cachedState = 'NOT_PROVIDED'
+$recoveryCode = $null
+$prioritySelected = $null
+$prioritySource = $null
+
 if (-not [string]::IsNullOrWhiteSpace($CachedAotrRoot)) {
     Add-Candidate -Path $CachedAotrRoot -Source 'CachedConfig' -DriveClass 'Unknown'
     $cachedRoot = Resolve-CandidateRoot $CachedAotrRoot
+
     if ($cachedRoot) {
         $cachedTest = Test-AotrStandaloneRoot -Root $cachedRoot -Sources @('CachedConfig') -DriveClass 'Unknown'
-        if ($cachedTest.HardValid -and -not $cachedTest.HardRejectedPath) {
+        if ($cachedTest.AutoEligible) {
             $cachedState = 'VALID'
+            $prioritySelected = $cachedTest
+            $prioritySource = 'CachedConfig'
         }
         else {
             $cachedState = 'INVALID_OR_MOVED'
+            $recoveryCode = 'A8P-INSTALL-007'
         }
     }
     else {
         $cachedState = 'INVALID_OR_MOVED'
+        $recoveryCode = 'A8P-INSTALL-007'
     }
 }
 
-# 2. Explicit environment override.
-if (-not [string]::IsNullOrWhiteSpace($env:AOTR_HOME)) {
-    Add-Candidate -Path $env:AOTR_HOME -Source 'AOTR_HOME' -DriveClass 'Unknown'
+if ($prioritySelected -and -not $AuditAllCandidates) {
+    $fastOutput = New-FinalOutput `
+        -Status 'AUTO_SELECTED' `
+        -ErrorCode $null `
+        -RecoveryCode $null `
+        -CachedPathState $cachedState `
+        -DiscoveryMode 'FAST_CACHED_CONFIG' `
+        -Selected $prioritySelected `
+        -AmbiguityCandidates @() `
+        -Candidates @($prioritySelected) `
+        -SearchStats @() `
+        -Drives @()
+
+    Write-PrototypeResult -Result $fastOutput -Json ([bool]$AsJson)
+    return
 }
 
-# 3. Launcher/install environment. Do not assume launcher location is the install root.
+# ---------------------------------------------------------------------------
+# 2. Explicit AOTR_HOME override. Validate before accepting it.
+# ---------------------------------------------------------------------------
+if (-not [string]::IsNullOrWhiteSpace($env:AOTR_HOME)) {
+    Add-Candidate -Path $env:AOTR_HOME -Source 'AOTR_HOME' -DriveClass 'Unknown'
+    $envRoot = Resolve-CandidateRoot $env:AOTR_HOME
+
+    if (-not $prioritySelected -and $envRoot) {
+        $envTest = Test-AotrStandaloneRoot -Root $envRoot -Sources @('AOTR_HOME') -DriveClass 'Unknown'
+        if ($envTest.AutoEligible) {
+            $prioritySelected = $envTest
+            $prioritySource = 'AOTR_HOME'
+        }
+    }
+}
+
+if ($prioritySelected -and -not $AuditAllCandidates) {
+    $envOutput = New-FinalOutput `
+        -Status 'AUTO_SELECTED' `
+        -ErrorCode $null `
+        -RecoveryCode $recoveryCode `
+        -CachedPathState $cachedState `
+        -DiscoveryMode (if ($prioritySource -eq 'AOTR_HOME') { 'FAST_AOTR_HOME' } else { 'FAST_CACHED_CONFIG' }) `
+        -Selected $prioritySelected `
+        -AmbiguityCandidates @() `
+        -Candidates @($prioritySelected) `
+        -SearchStats @() `
+        -Drives @()
+
+    Write-PrototypeResult -Result $envOutput -Json ([bool]$AsJson)
+    return
+}
+
+# ---------------------------------------------------------------------------
+# 3. Launcher/install environment. Do not assume launcher location is AotR.
+# ---------------------------------------------------------------------------
 if (-not [string]::IsNullOrWhiteSpace($LauncherPath)) {
     try {
         $launcherCanonical = Get-CanonicalPath $LauncherPath
@@ -388,31 +557,53 @@ if (-not [string]::IsNullOrWhiteSpace($LauncherPath)) {
     catch { }
 }
 
-# 4. Fixed drives first, then Removable. Network drives are deliberately absent.
-$drives = Get-LocalDrivesByClass
+# ---------------------------------------------------------------------------
+# 4-6. Normal Fixed drives first; Removable/USB/exFAT after them.
+# Network drives never enter this list.
+# ---------------------------------------------------------------------------
+$drives = @(Get-LocalDrivesByClass)
 $fixedDrives = @($drives | Where-Object { $_.DriveClass -eq 'Fixed' })
-$removableDrives = @($drives | Where-Object { $_.DriveClass -eq 'Removable' })
+$secondaryDrives = @($drives | Where-Object { $_.DriveClass -eq 'RemovableUsbOrExFat' })
 
 Add-KnownDriveCandidates -Drives $fixedDrives
 
 $searchStats = New-Object System.Collections.ArrayList
 foreach ($drive in $fixedDrives) {
-    [void]$searchStats.Add((Find-AgeOfTheRingDirectories -StartRoot $drive.Root -DriveClass $drive.DriveClass -MaxDepth $SearchDepth -MaxDirectories $MaxDirectoriesPerDrive))
+    [void]$searchStats.Add((Find-AgeOfTheRingDirectories `
+        -StartRoot $drive.Root `
+        -DriveClass $drive.DriveClass `
+        -MaxDepth $SearchDepth `
+        -MaxDirectories $MaxDirectoriesPerDrive))
 }
 
-# 5. Removable / USB / exFAT only after Fixed-drive discovery.
-Add-KnownDriveCandidates -Drives $removableDrives
-foreach ($drive in $removableDrives) {
-    [void]$searchStats.Add((Find-AgeOfTheRingDirectories -StartRoot $drive.Root -DriveClass $drive.DriveClass -MaxDepth $SearchDepth -MaxDirectories $MaxDirectoriesPerDrive))
+Add-KnownDriveCandidates -Drives $secondaryDrives
+foreach ($drive in $secondaryDrives) {
+    [void]$searchStats.Add((Find-AgeOfTheRingDirectories `
+        -StartRoot $drive.Root `
+        -DriveClass $drive.DriveClass `
+        -MaxDepth $SearchDepth `
+        -MaxDirectories $MaxDirectoriesPerDrive))
 }
 
-# Validate every deduplicated candidate.
+# ---------------------------------------------------------------------------
+# 7. Validate every deduplicated candidate, then score/rank.
+# ---------------------------------------------------------------------------
 $results = New-Object System.Collections.ArrayList
 foreach ($entry in $script:CandidateMap.Values) {
-    [void]$results.Add((Test-AotrStandaloneRoot -Root $entry.Root -Sources @($entry.Sources) -DriveClass $entry.DriveClass))
+    [void]$results.Add((Test-AotrStandaloneRoot `
+        -Root $entry.Root `
+        -Sources @($entry.Sources) `
+        -DriveClass $entry.DriveClass))
 }
 
-$ranked = @($results | Sort-Object @{ Expression = 'HardValid'; Descending = $true }, @{ Expression = 'AutoEligible'; Descending = $true }, @{ Expression = 'Score'; Descending = $true }, Root)
+$ranked = @(
+    $results | Sort-Object -Property `
+        @{ Expression = 'HardValid'; Descending = $true }, `
+        @{ Expression = 'AutoEligible'; Descending = $true }, `
+        @{ Expression = 'Score'; Descending = $true }, `
+        @{ Expression = 'Root'; Descending = $false }
+)
+
 $eligible = @($ranked | Where-Object { $_.AutoEligible })
 $validButDeprioritized = @($ranked | Where-Object { $_.HardValid -and -not $_.AutoEligible })
 
@@ -420,8 +611,27 @@ $status = 'NOT_FOUND'
 $errorCode = 'A8P-INSTALL-001'
 $selected = $null
 $ambiguity = @()
+$discoveryMode = if ($AuditAllCandidates) { 'FULL_AUDIT' } else { 'FULL_DISCOVERY' }
 
-if ($eligible.Count -gt 0) {
+# Explicit validated priority sources remain authoritative even in audit mode;
+# full discovery merely adds diagnostics around them.
+if ($prioritySelected) {
+    $selected = $ranked |
+        Where-Object { $_.Root -ieq $prioritySelected.Root } |
+        Select-Object -First 1
+
+    if (-not $selected) { $selected = $prioritySelected }
+
+    $status = 'AUTO_SELECTED'
+    $errorCode = $null
+    $discoveryMode = if ($prioritySource -eq 'CachedConfig') {
+        'FULL_AUDIT_WITH_CACHED_PRIORITY'
+    }
+    else {
+        'FULL_AUDIT_WITH_AOTR_HOME_PRIORITY'
+    }
+}
+elseif ($eligible.Count -gt 0) {
     $topScore = ($eligible | Measure-Object -Property Score -Maximum).Maximum
     $top = @($eligible | Where-Object { $_.Score -eq $topScore })
 
@@ -441,45 +651,16 @@ elseif ($validButDeprioritized.Count -gt 0) {
     $errorCode = 'A8P-INSTALL-001'
 }
 
-$suggestedConfig = $null
-if ($selected) {
-    $suggestedConfig = [ordered]@{
-        schema = 2
-        aotr_root = $selected.Root
-        runtime = $selected.Runtime
-        source_mod = $selected.SourceMod
-        game_dat = $selected.GameDat
-        validation = 'aotr-standalone-v2'
-        score = $selected.Score
-        last_verified_utc = ''
-    }
-}
+$output = New-FinalOutput `
+    -Status $status `
+    -ErrorCode $errorCode `
+    -RecoveryCode $recoveryCode `
+    -CachedPathState $cachedState `
+    -DiscoveryMode $discoveryMode `
+    -Selected $selected `
+    -AmbiguityCandidates @($ambiguity) `
+    -Candidates @($ranked) `
+    -SearchStats @($searchStats) `
+    -Drives @($drives)
 
-$output = [pscustomobject]@{
-    Prototype = 'AOTR_8P_ROBUST_AUTODETECT_PROTOTYPE_V1'
-    ReadOnly = $true
-    Status = $status
-    ErrorCode = $errorCode
-    CachedPathState = $cachedState
-    Selected = $selected
-    AmbiguityCandidates = @($ambiguity)
-    SuggestedConfigV2 = $suggestedConfig
-    Candidates = @($ranked)
-    SearchStats = @($searchStats)
-    Safety = [pscustomobject]@{
-        NetworkRecursiveScan = $false
-        WritesFiles = $false
-        WritesRegistry = $false
-        ModifiesLauncher = $false
-        ModifiesGame = $false
-        ExecutesRepairActions = $false
-        WriteabilityTest = 'NOT_PERFORMED'
-    }
-}
-
-if ($AsJson) {
-    $output | ConvertTo-Json -Depth 8
-}
-else {
-    $output
-}
+Write-PrototypeResult -Result $output -Json ([bool]$AsJson)
