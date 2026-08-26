@@ -13,6 +13,9 @@ labels:
   - name: launcher
     color: 1d76db
     description: Standalone launcher behavior
+  - name: launcher-report
+    color: 0366d6
+    description: Report opened from the launcher after auto-repair failed
   - name: payload
     color: 0e8a16
     description: Packaged payload integrity or deployment
