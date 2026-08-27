@@ -2,6 +2,12 @@ name: Export v1.1.1 Launcher Provenance
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/guardian/EXPORT_V111_LAUNCHER_RESOURCES.ps1"
+      - ".github/workflows/export-v111-launcher-provenance.yml"
 
 permissions:
   contents: read
