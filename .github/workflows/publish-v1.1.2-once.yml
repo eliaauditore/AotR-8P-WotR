@@ -1,0 +1,140 @@
+name: Publish v1.1.2 exact frozen release once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.1.2-once.yml'
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_COMMIT: 131aacd19f8ea02399db6ad0dab69c4253fbe834
+  RELEASE_TAG: v1.1.2
+  ARTIFACT_ID: '9657563731'
+  EXPECTED_ZIP_SHA256: F67DFE9E2E4215982891D58302445AF95CF177A341E95D54E8D4C0F01EE1D097
+  EXPECTED_EXE_SHA256: 5B4D12B7BF43D72860E27C51A3D8AC7AC00CA53DB58499E41AC735F7B7ECED0E
+  EXPECTED_MANIFEST_SHA256: 26851416B61745E0009550A924F54E8AF47992693A01728E348DBC530FEAC729
+  EXPECTED_REPAIR_SHA256: B2BEEBF586F95D2E2F6B4A86F142FEF40561E72C907A4BDB3FA5D597377855AA
+  EXPECTED_UI_SHA256: 827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376
+  EXPECTED_PAPER_SHA256: 3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43
+  INNER_ARTIFACT_ZIP: AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+  RELEASE_ASSET_ZIP: AotR_8P_War_of_the_Ring_1.1.2_ModDB_Official.zip
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail closed on release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${RELEASE_COMMIT}^{commit}"
+          test "$(git show "${RELEASE_COMMIT}:manifest.json" | tr -d '\r' | grep -o '"launcher_version"[^,]*' | grep -o '1\.1\.2')" = '1.1.2'
+          git show "${RELEASE_COMMIT}:manifest.json" | tr -d '\r' | grep -q "${EXPECTED_EXE_SHA256}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "ERROR: ${RELEASE_TAG} already exists; refusing to overwrite protected release identity."
+            exit 1
+          fi
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "ERROR: GitHub Release ${RELEASE_TAG} already exists; refusing duplicate publication."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download exact frozen RC7 artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            --output rc7-artifact-wrapper.zip
+          mkdir artifact
+          unzip -q rc7-artifact-wrapper.zip -d artifact
+          test -f "artifact/${INNER_ARTIFACT_ZIP}"
+          actual="$(sha256sum "artifact/${INNER_ARTIFACT_ZIP}" | awk '{print toupper($1)}')"
+          test "${actual}" = "${EXPECTED_ZIP_SHA256}"
+          cp "artifact/${INNER_ARTIFACT_ZIP}" "${RELEASE_ASSET_ZIP}"
+          test "$(sha256sum "${RELEASE_ASSET_ZIP}" | awk '{print toupper($1)}')" = "${EXPECTED_ZIP_SHA256}"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Verify exact five-file public package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir verify
+          unzip -q "${RELEASE_ASSET_ZIP}" -d verify
+          mapfile -t files < <(find verify -maxdepth 1 -type f -printf '%f\n' | sort)
+          expected=(
+            'AotR 8P WotR Mod.exe'
+            'manifest.json'
+            'payload_paper.inc'
+            'payload_ui.big'
+            'repair-manifest.json'
+          )
+          test "${#files[@]}" -eq 5
+          for i in "${!expected[@]}"; do test "${files[$i]}" = "${expected[$i]}"; done
+          test "$(sha256sum 'verify/AotR 8P WotR Mod.exe' | awk '{print toupper($1)}')" = "${EXPECTED_EXE_SHA256}"
+          test "$(sha256sum 'verify/manifest.json' | awk '{print toupper($1)}')" = "${EXPECTED_MANIFEST_SHA256}"
+          test "$(sha256sum 'verify/repair-manifest.json' | awk '{print toupper($1)}')" = "${EXPECTED_REPAIR_SHA256}"
+          test "$(sha256sum 'verify/payload_ui.big' | awk '{print toupper($1)}')" = "${EXPECTED_UI_SHA256}"
+          test "$(sha256sum 'verify/payload_paper.inc' | awk '{print toupper($1)}')" = "${EXPECTED_PAPER_SHA256}"
+          printf '%s  %s\n' "${EXPECTED_ZIP_SHA256}" "${RELEASE_ASSET_ZIP}" > "${RELEASE_ASSET_ZIP}.sha256.txt"
+          echo 'EXACT_FROZEN_RELEASE_GATE=PASS'
+
+      - name: Create protected release tag at exact release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "${RELEASE_TAG}" "${RELEASE_COMMIT}" -m 'AotR 8P War of the Ring 1.1.2'
+          git push origin "refs/tags/${RELEASE_TAG}"
+
+      - name: Publish GitHub Release using exact frozen ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          # AotR 8P War of the Ring 1.1.2
+
+          This release promotes the exact runtime-tested RC7 launcher and five-file standalone package.
+
+          ## Runtime acceptance
+          - Auto-Repair and full post-repair health re-check: PASS
+          - automatic launch after clean re-check: PASS
+          - launcher -> game handoff and automatic launcher close: PASS
+          - 8-player War of the Ring rows: PASS
+          - strategic-map zoom: PASS
+          - strategic-map drag: PASS
+
+          ## Exact identities
+          - EXE SHA256: `5B4D12B7BF43D72860E27C51A3D8AC7AC00CA53DB58499E41AC735F7B7ECED0E`
+          - Public/ModDB ZIP SHA256: `F67DFE9E2E4215982891D58302445AF95CF177A341E95D54E8D4C0F01EE1D097`
+
+          ## Windows Defender note
+          An earlier, different 1.1.2 candidate was detected by Windows Defender as `Trojan:Win32/Wacatac.C!ml`. The final 1.1.2 binary above is a different hash and passed hosted Defender scanning and full runtime acceptance, but pristine-environment Defender acceptance was explicitly waived by the maintainer for this publication. This release therefore does **not** claim universal Defender cleanliness.
+
+          Do not disable antivirus protection or add exclusions as a normal installation requirement. If Defender reports the exact final hash above, report the detection so it can be tracked under Issue #38.
+          EOF
+          gh release create "${RELEASE_TAG}" \
+            "${RELEASE_ASSET_ZIP}" \
+            "${RELEASE_ASSET_ZIP}.sha256.txt" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title 'AotR 8P War of the Ring 1.1.2' \
+            --notes-file release-notes.md
+          echo 'V1_1_2_GITHUB_RELEASE_PUBLISHED=PASS'
+        env:
+          GH_TOKEN: ${{ github.token }}
