@@ -1,0 +1,133 @@
+name: Validate Release Consistency
+
+on:
+  pull_request:
+    paths:
+      - "AotR 8P WotR Mod.exe"
+      - "manifest.json"
+      - "repair-manifest.json"
+      - "payload_ui.big"
+      - "payload_paper.inc"
+      - "launcher-source/**"
+      - ".github/workflows/validate-release-consistency.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "AotR 8P WotR Mod.exe"
+      - "manifest.json"
+      - "repair-manifest.json"
+      - "payload_ui.big"
+      - "payload_paper.inc"
+      - "launcher-source/**"
+      - ".github/workflows/validate-release-consistency.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate release metadata and hashes
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib
+          import json
+          import sys
+
+          root = Path(".")
+
+          def fail(message):
+              print(f"ERROR: {message}", file=sys.stderr)
+              raise SystemExit(1)
+
+          def sha256(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest().upper()
+
+          manifest_path = root / "manifest.json"
+          repair_path = root / "repair-manifest.json"
+
+          with manifest_path.open("r", encoding="utf-8-sig") as handle:
+              manifest = json.load(handle)
+          with repair_path.open("r", encoding="utf-8-sig") as handle:
+              repair = json.load(handle)
+
+          version = str(manifest.get("launcher_version", "")).strip()
+          if not version:
+              fail("manifest.json has no launcher_version")
+
+          repair_version = str(repair.get("generated_for_launcher", "")).strip()
+          if repair_version != version:
+              fail(
+                  f"repair-manifest generated_for_launcher={repair_version!r} "
+                  f"does not match launcher_version={version!r}"
+              )
+
+          checks = [
+              (root / "AotR 8P WotR Mod.exe", "launcher_sha256"),
+              (root / "payload_ui.big", "ui_sha256"),
+              (root / "payload_paper.inc", "paper_sha256"),
+          ]
+
+          for path, key in checks:
+              if not path.is_file():
+                  fail(f"missing release file: {path}")
+              expected = str(manifest.get(key, "")).strip().upper()
+              if not expected:
+                  fail(f"manifest.json has no {key}")
+              actual = sha256(path)
+              if actual != expected:
+                  fail(
+                      f"SHA256 mismatch for {path}: expected {expected}, actual {actual}"
+                  )
+              print(f"HASH OK: {path} = {actual}")
+
+          version_token = version.replace(".", "_")
+          builders = sorted((root / "launcher-source").glob(f"*FINAL*{version_token}*.ps1"))
+          if not builders:
+              fail(
+                  "no FINAL launcher builder matching current launcher version "
+                  f"{version} was found under launcher-source/"
+              )
+          print("BUILDER OK:", ", ".join(str(path) for path in builders))
+
+          allowed_actions = {
+              "reset_install",
+              "retry_launch",
+              "repair_payloads",
+              "reset_runtime",
+              "stop_old_dev_launchers",
+              "stop_legacy_runtime",
+              "stop_failed_game",
+              "check_launcher_update",
+              "clear_compat_cache",
+          }
+
+          seen_actions = set()
+          plans = repair.get("plans")
+          if not isinstance(plans, dict) or not plans:
+              fail("repair-manifest.json has no non-empty plans object")
+
+          for error_code, plan in plans.items():
+              actions = plan.get("actions", []) if isinstance(plan, dict) else []
+              if not isinstance(actions, list):
+                  fail(f"repair plan {error_code} has non-list actions")
+              for action in actions:
+                  if action not in allowed_actions:
+                      fail(
+                          f"repair plan {error_code} introduces unknown action {action!r}; "
+                          "verify launcher dispatcher support and update the Guardian allowlist deliberately"
+                      )
+                  seen_actions.add(action)
+
+          print("REPAIR ACTIONS OK:", ", ".join(sorted(seen_actions)))
+          print(f"RELEASE CONSISTENCY OK: launcher {version}")
