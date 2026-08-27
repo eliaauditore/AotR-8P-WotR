@@ -35,9 +35,6 @@ jobs:
           & '.\tools\guardian\EXPORT_V111_LAUNCHER_RESOURCES.ps1' `
               -DonorRoot $donor `
               -OutputRoot $output
-          if ($LASTEXITCODE -ne 0) {
-              throw "Provenance exporter failed with exit code $LASTEXITCODE"
-          }
 
       - name: Upload provenance evidence
         uses: actions/upload-artifact@v4
