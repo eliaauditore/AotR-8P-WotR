@@ -31,10 +31,26 @@ function Get-Sha256([string]$Path) {
     }
 }
 
-function Add-Result([System.Collections.Generic.List[string]]$Lines, [string]$Name, [bool]$Pass, [string]$Detail) {
+function Add-Result(
+    [System.Collections.Generic.List[string]]$Lines,
+    [string]$Name,
+    [bool]$Pass,
+    [string]$Detail
+) {
     $status = if ($Pass) { "PASS" } else { "FAIL" }
-    $Lines.Add("- **$Name:** `$status` - $Detail")
+    $Lines.Add(("- **{0}:** {1} - {2}" -f $Name, $status, $Detail))
 }
+
+function Write-Report(
+    [System.Collections.Generic.List[string]]$Lines,
+    [string]$Path
+) {
+    $Lines | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+if ($GameStartTimeoutSeconds -lt 1) { throw "GameStartTimeoutSeconds must be at least 1." }
+if ($GameStableSeconds -lt 1) { throw "GameStableSeconds must be at least 1." }
+if ($LauncherExitTimeoutSeconds -lt 1) { throw "LauncherExitTimeoutSeconds must be at least 1." }
 
 if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
     $PackageRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
@@ -80,6 +96,12 @@ if ($PaperHash -ne $ExpectedPaperSha256) {
 if ([string]$Manifest.launcher_sha256 -ne $LauncherHash) {
     throw "manifest.json launcher_sha256 does not match the tested EXE."
 }
+if ([string]$Manifest.ui_sha256 -ne $UiHash) {
+    throw "manifest.json ui_sha256 does not match payload_ui.big."
+}
+if ([string]$Manifest.paper_sha256 -ne $PaperHash) {
+    throw "manifest.json paper_sha256 does not match payload_paper.inc."
+}
 
 $ExistingGame = @(Get-Process -Name "lotrbfme2ep1" -ErrorAction SilentlyContinue)
 if ($ExistingGame.Count -gt 0) {
@@ -96,17 +118,17 @@ $ReportPath = Join-Path $ReportRoot ("LAUNCHER_1_1_INGAME_SMOKE_{0}.md" -f $Stam
 $Lines = New-Object 'System.Collections.Generic.List[string]'
 $Lines.Add("# Launcher 1.1 exact-final in-game smoke")
 $Lines.Add("")
-$Lines.Add("- Timestamp: `$(Get-Date -Format o)`")
-$Lines.Add("- Package root: `$PackageRoot`")
-$Lines.Add("- Launcher SHA256: `$LauncherHash`")
-$Lines.Add("- Expected release SHA256: `$ExpectedLauncherSha256`")
+$Lines.Add(("- Timestamp: {0}" -f (Get-Date -Format o)))
+$Lines.Add(("- Package root: {0}" -f $PackageRoot))
+$Lines.Add(("- Launcher SHA256: {0}" -f $LauncherHash))
+$Lines.Add(("- Expected release SHA256: {0}" -f $ExpectedLauncherSha256))
 $Lines.Add("")
 $Lines.Add("## Results")
 $Lines.Add("")
 
 Add-Result $Lines "Release identity" $true "launcher 1.1 EXE, manifest, repair manifest, UI and PaperScenario hashes match the frozen release values."
 
-Write-Host "" 
+Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " AotR 8P WotR - Launcher 1.1 exact-final smoke" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
@@ -119,9 +141,10 @@ Write-Host "Do not manually start AotR outside the launcher during this test." -
 Write-Host ""
 
 $LauncherProcess = Start-Process -FilePath $LauncherPath -WorkingDirectory $PackageRoot -PassThru
-$Lines.Add("- Launcher PID: `$($LauncherProcess.Id)`")
+$Lines.Add(("- Launcher PID: {0}" -f $LauncherProcess.Id))
 
 $GameProcess = $null
+$LauncherExitedBeforeGame = $false
 $Deadline = [DateTime]::UtcNow.AddSeconds($GameStartTimeoutSeconds)
 
 while ([DateTime]::UtcNow -lt $Deadline) {
@@ -137,22 +160,36 @@ while ([DateTime]::UtcNow -lt $Deadline) {
             # Ignore a process that disappears while being inspected.
         }
     }
+
     if ($GameProcess) { break }
+
+    if (-not (Get-Process -Id $LauncherProcess.Id -ErrorAction SilentlyContinue)) {
+        $LauncherExitedBeforeGame = $true
+        break
+    }
+
     Start-Sleep -Milliseconds 500
 }
 
 if (-not $GameProcess) {
-    Add-Result $Lines "START -> AotR process" $false "no new lotrbfme2ep1.exe process appeared within $GameStartTimeoutSeconds seconds."
+    if ($LauncherExitedBeforeGame) {
+        $gameStartDetail = "launcher exited before a new lotrbfme2ep1.exe process appeared."
+    }
+    else {
+        $gameStartDetail = "no new lotrbfme2ep1.exe process appeared within $GameStartTimeoutSeconds seconds."
+    }
+
+    Add-Result $Lines "START -> AotR process" $false $gameStartDetail
     $Lines.Add("")
     $Lines.Add("Overall: **FAIL**")
-    $Lines | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+    Write-Report $Lines $ReportPath
     Write-Host "FAIL: no new lotrbfme2ep1.exe process detected." -ForegroundColor Red
     Write-Host "Report: $ReportPath"
     exit 1
 }
 
-Add-Result $Lines "START -> AotR process" $true "new lotrbfme2ep1.exe detected as PID $($GameProcess.Id)."
-Write-Host "Detected AotR game process PID $($GameProcess.Id)." -ForegroundColor Green
+Add-Result $Lines "START -> AotR process" $true ("new lotrbfme2ep1.exe detected as PID {0}." -f $GameProcess.Id)
+Write-Host ("Detected AotR game process PID {0}." -f $GameProcess.Id) -ForegroundColor Green
 
 $GameStable = $true
 for ($i = 0; $i -lt $GameStableSeconds; $i++) {
@@ -163,7 +200,13 @@ for ($i = 0; $i -lt $GameStableSeconds; $i++) {
     }
 }
 
-Add-Result $Lines "Game process stability" $GameStable (if ($GameStable) { "game process remained alive for at least $GameStableSeconds seconds." } else { "game process exited before the $GameStableSeconds-second stability window completed." })
+if ($GameStable) {
+    $GameStableDetail = "game process remained alive for at least $GameStableSeconds seconds."
+}
+else {
+    $GameStableDetail = "game process exited before the $GameStableSeconds-second stability window completed."
+}
+Add-Result $Lines "Game process stability" $GameStable $GameStableDetail
 
 $LauncherExited = $false
 $LauncherDeadline = [DateTime]::UtcNow.AddSeconds($LauncherExitTimeoutSeconds)
@@ -175,27 +218,34 @@ while ([DateTime]::UtcNow -lt $LauncherDeadline) {
     Start-Sleep -Milliseconds 500
 }
 
-Add-Result $Lines "Launcher exits after game start" $LauncherExited (if ($LauncherExited) { "launcher process exited after handing off to AotR." } else { "launcher process was still present after $LauncherExitTimeoutSeconds seconds." })
+if ($LauncherExited) {
+    $LauncherExitDetail = "launcher process exited after handing off to AotR."
+}
+else {
+    $LauncherExitDetail = "launcher process was still present after $LauncherExitTimeoutSeconds seconds."
+}
+Add-Result $Lines "Launcher exits after game start" $LauncherExited $LauncherExitDetail
 
 $OverallPass = $GameStable -and $LauncherExited
+$OverallText = if ($OverallPass) { "PASS" } else { "FAIL" }
+
 $Lines.Add("")
 $Lines.Add("## Evidence boundary")
 $Lines.Add("")
-$Lines.Add("This automated smoke proves that the exact frozen launcher 1.1 artifact accepted START, created a fresh AotR `lotrbfme2ep1.exe` process, and (when PASS) that the game process remained alive through the configured stability window while the launcher exited after handoff.")
+$Lines.Add("This automated smoke proves that the exact frozen launcher 1.1 artifact accepted START, created a fresh AotR lotrbfme2ep1.exe process, and, when PASS, that the game process remained alive through the configured stability window while the launcher exited after handoff.")
 $Lines.Add("")
 $Lines.Add("It does not by itself prove multiplayer/OOS behavior, strategic-turn correctness, or every internal RAM patch. Those remain covered by their own reverse-engineering/runtime checkpoints.")
 $Lines.Add("")
-$Lines.Add(("Overall: **{0}**" -f $(if ($OverallPass) { "PASS" } else { "FAIL" })))
+$Lines.Add(("Overall: **{0}**" -f $OverallText))
 
-$Lines | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+Write-Report $Lines $ReportPath
 
 if ($OverallPass) {
     Write-Host "PASS: exact launcher 1.1 START -> AotR smoke succeeded." -ForegroundColor Green
     Write-Host "Report: $ReportPath"
     exit 0
 }
-else {
-    Write-Host "FAIL: AotR started, but one or more handoff/stability checks failed." -ForegroundColor Red
-    Write-Host "Report: $ReportPath"
-    exit 2
-}
+
+Write-Host "FAIL: AotR started, but one or more handoff/stability checks failed." -ForegroundColor Red
+Write-Host "Report: $ReportPath"
+exit 2
