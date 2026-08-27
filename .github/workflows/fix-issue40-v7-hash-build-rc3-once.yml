@@ -1,0 +1,136 @@
+name: Fix Issue 40 V7 Hash and Build RC3 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - .github/workflows/fix-issue40-v7-hash-build-rc3-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-issue40-build-rc3:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Prepare V7 clean-resource integrity fix with placeholder engine hash
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          anchor = 'engine = regex_once(engine, r"(?ms)^\\$FinalStableV7Base64\\s*=\\s*@\'\\n.*?^\'@\\n", "", "FINAL_STABLE_V7 Base64 removal")\n'
+          if text.count(anchor) != 1:
+              raise SystemExit(f'Issue40 insertion anchor count={text.count(anchor)}')
+          insertion = anchor + 'engine = replace_once(engine, \'$FinalStableV7Sha256 = "FEAF40B3B231646CD8F7C7099D1E8544090D5010F1C6DB06E5B2F3EF8C0C5F44"\\n\', \'$FinalStableV7Sha256 = "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED"\\n\', "clean FINAL_STABLE_V7 resource integrity hash")\n'
+          text = text.replace(anchor, insertion, 1)
+          old = 'EXPECTED_ENGINE_OUT = "A2E3545A040503E47237E3869E8F5D3A25FB857C007DA11C17386481D45817EC"'
+          if text.count(old) != 1:
+              raise SystemExit('Old clean engine expected hash anchor missing')
+          text = text.replace(old, 'EXPECTED_ENGINE_OUT = "' + ('0' * 64) + '"', 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Derive deterministic engine hash after issue 40 fix
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+              -FrozenDonorRoot .\donor-v1.1.1 `
+              -OutputRoot .\_ISSUE40_HASH_DERIVE `
+              -LauncherVersion 1.1.2
+            throw 'Hash derivation unexpectedly succeeded with placeholder engine hash.'
+          }
+          catch {
+            Write-Host "Expected issue40 hash derivation stop: $($_.Exception.Message)"
+          }
+          $engine='.\_ISSUE40_HASH_DERIVE\work\resources\launcher_engine.ps1'
+          $gui='.\_ISSUE40_HASH_DERIVE\work\resources\launcher_gui.ps1'
+          if(-not(Test-Path -LiteralPath $engine)){throw 'Derived engine resource missing'}
+          if(-not(Test-Path -LiteralPath $gui)){throw 'Derived GUI resource missing'}
+          $engineHash=(Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash.ToUpperInvariant()
+          $guiHash=(Get-FileHash -LiteralPath $gui -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($guiHash -ne '4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC'){throw "Unexpected GUI change: $guiHash"}
+          $engineText=Get-Content -LiteralPath $engine -Raw -Encoding UTF8
+          if($engineText -notmatch '3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED'){throw 'New V7 clean-resource hash missing from transformed engine'}
+          if($engineText -match '\$FinalStableV7Sha256\s*=\s*"FEAF40B3'){throw 'Old frozen V7 hash remains active in transformed engine'}
+          "ENGINE_HASH=$engineHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "ISSUE40_FIXED_ENGINE_SHA256=$engineHash"
+          $global:LASTEXITCODE=0
+          exit 0
+
+      - name: Pin deterministic engine hash and build gate
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h = os.environ['ENGINE_HASH'].strip().upper()
+          if len(h) != 64:
+              raise SystemExit('Invalid derived ENGINE_HASH')
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          zero = 'EXPECTED_ENGINE_OUT = "' + ('0' * 64) + '"'
+          if text.count(zero) != 1:
+              raise SystemExit('Placeholder transformer engine hash missing')
+          text = text.replace(zero, f'EXPECTED_ENGINE_OUT = "{h}"', 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          old = 'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "A2E3545A040503E47237E3869E8F5D3A25FB857C007DA11C17386481D45817EC" "Clean engine"'
+          if bt.count(old) != 1:
+              raise SystemExit('Old engine build hash gate missing')
+          bt = bt.replace(old, f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{h}" "Clean engine"', 1)
+          b.write_text(bt, encoding='utf-8', newline='\n')
+
+      - name: Commit issue 40 runtime fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: fix clean FINAL_STABLE_V7 integrity hash"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build and Defender-scan 1.1.2 RC3
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_V19_1_1_2_RC3 `
+            -LauncherVersion 1.1.2
+          $engine='.\_V19_1_1_2_RC3\work\resources\launcher_engine.ps1'
+          $txt=Get-Content -LiteralPath $engine -Raw -Encoding UTF8
+          if($txt -notmatch '\$FinalStableV7Sha256\s*=\s*"3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED"'){throw 'Issue #40 expected clean V7 hash not active'}
+          if($txt -match '\$FinalStableV7Sha256\s*=\s*"FEAF40B3'){throw 'Issue #40 old frozen V7 hash still active'}
+          Write-Host 'ISSUE40_V7_RESOURCE_HASH_REGRESSION_GATE=PASS'
+
+      - name: Upload RC3 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC3-Issue40-Fixed
+          path: |
+            _V19_1_1_2_RC3/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _V19_1_1_2_RC3/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _V19_1_1_2_RC3/SHA256SUMS.json
+            _V19_1_1_2_RC3/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
