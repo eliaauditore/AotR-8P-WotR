@@ -7,6 +7,10 @@ on:
       - main
     paths:
       - "tools/guardian/EXPORT_V111_LAUNCHER_RESOURCES.ps1"
+      - "launcher-source/v19/prepare_clean_resources.py"
+      - "launcher-source/v19/prepare_final_stable_resource.py"
+      - "launcher-source/v19/apply_issue43_recheck_flow.py"
+      - "launcher-source/v19/VERIFY_V7_RESOURCE_CHAIN.ps1"
       - ".github/workflows/export-v111-launcher-provenance.yml"
 
 permissions:
@@ -36,10 +40,78 @@ jobs:
               -DonorRoot $donor `
               -OutputRoot $output
 
+      - name: Reproduce V19 clean resource transforms
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '_provenance_v111'))
+          $clean = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '_v19_clean_provenance'))
+          New-Item -ItemType Directory -Force -Path $clean | Out-Null
+
+          foreach ($name in @(
+              'launcher_skin.png','launcher.ico',
+              'row1cleanpatch.png','row2cleanpatch.png','row3cleanpatch.png','readycleanpatch.png'
+          )) {
+              Copy-Item -LiteralPath (Join-Path $source $name) -Destination (Join-Path $clean $name) -Force
+          }
+
+          $python = (Get-Command python -ErrorAction Stop).Source
+          & $python '.\launcher-source\v19\prepare_clean_resources.py' `
+              (Join-Path $source 'launcher_gui.ps1') `
+              (Join-Path $source 'launcher_engine.ps1') `
+              $clean
+          if ($LASTEXITCODE -ne 0) { throw 'V19 GUI/engine transform failed.' }
+
+          & $python '.\launcher-source\v19\apply_issue43_recheck_flow.py' `
+              (Join-Path $clean 'launcher_gui.ps1') `
+              --expected-output '135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD'
+          if ($LASTEXITCODE -ne 0) { throw 'Issue43 GUI transform failed.' }
+
+          & $python '.\launcher-source\v19\prepare_final_stable_resource.py' `
+              (Join-Path $source 'final_stable_v7.ps1') `
+              (Join-Path $clean 'final_stable_v7.ps1') `
+              (Join-Path $clean 'v7_shellcode.bin')
+          if ($LASTEXITCODE -ne 0) { throw 'V19 FINAL_STABLE transform failed.' }
+
+          $expected = @{
+              'launcher_gui.ps1'     = '135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD'
+              'launcher_engine.ps1'  = '5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938'
+              'final_stable_v7.ps1' = '72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2'
+              'v7_shellcode.bin'    = '60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A'
+          }
+          foreach ($name in $expected.Keys) {
+              $path = Join-Path $clean $name
+              $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToUpperInvariant()
+              if ($actual -ne $expected[$name]) {
+                  throw "$name hash mismatch. Expected $($expected[$name]), got $actual"
+              }
+              Write-Host "V19 CLEAN OK: $name $actual" -ForegroundColor Green
+          }
+
+          & '.\launcher-source\v19\VERIFY_V7_RESOURCE_CHAIN.ps1' -ResourcesRoot $clean
+
+          $records = foreach ($file in @(Get-ChildItem -LiteralPath $clean -File | Sort-Object Name)) {
+              [ordered]@{
+                  name = $file.Name
+                  size = [int64]$file.Length
+                  sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+              }
+          }
+          [ordered]@{
+              schema = 1
+              purpose = 'V19 clean transformed provenance; analysis only, not an OSS license grant'
+              source_ref = 'v1.1.1'
+              transform_source_ref = $env:GITHUB_SHA
+              records = $records
+              warning = 'Transformed resources still require ownership/proprietary-byte review before any SignPath Foundation application.'
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $clean 'transformed_provenance.json') -Encoding UTF8
+
       - name: Upload provenance evidence
         uses: actions/upload-artifact@v4
         with:
           name: v1.1.1-launcher-provenance
-          path: _provenance_v111/**
+          path: |
+            _provenance_v111/**
+            _v19_clean_provenance/**
           if-no-files-found: error
           retention-days: 30
