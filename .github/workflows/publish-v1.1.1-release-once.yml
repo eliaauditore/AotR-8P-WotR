@@ -1,0 +1,81 @@
+name: Publish Launcher 1.1.1 Release Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-v1.1.1-release-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify frozen launcher 1.1.1 release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_COMMIT="303c202ffd809dbe70fb6e2611d98ce4f9773128"
+          git cat-file -e "${RELEASE_COMMIT}^{commit}"
+          echo "Frozen launcher 1.1.1 release commit: ${RELEASE_COMMIT}"
+
+      - name: Create v1.1.1 tag if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_COMMIT="303c202ffd809dbe70fb6e2611d98ce4f9773128"
+          if git ls-remote --exit-code --tags origin "refs/tags/v1.1.1" >/dev/null 2>&1; then
+            echo "v1.1.1 already exists; leaving it untouched."
+          else
+            git tag v1.1.1 "${RELEASE_COMMIT}"
+            git push origin refs/tags/v1.1.1
+          fi
+
+      - name: Create GitHub Release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.1.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release v1.1.1 already exists; leaving it untouched."
+            exit 0
+          fi
+
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          # AotR 8P WotR Launcher 1.1.1
+
+          Guarded replacement for the standalone-bootstrap failure tracked in #33.
+
+          Frozen production release reference:
+
+          - Main release commit: `303c202ffd809dbe70fb6e2611d98ce4f9773128`
+          - Accepted staging commit: `19b1c5cf70c277d5892638649697c9d41d0a68ef`
+          - Launcher EXE SHA256: `2141EA9690708EA7A61B7298AD90E0C76CC417FED996AC0CF3685276BA2A4024`
+          - Manifest SHA256: `B5B499DCC5ADA8A5ED5FADE3E60248F0685CD48D61042F7487D34660F83B6830`
+          - Repair-manifest SHA256: `DE45A92444E5943D9908267C5B80D1263F957E58EBC0840A6EDD00318A7741A8`
+          - UI SHA256: `827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376`
+          - Paper SHA256: `3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43`
+          - Embedded/materialized skin SHA256: `BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6`
+          - Canonical builder: `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1_1.ps1`
+          - Canonical builder SHA256: `32BCAC9D82F2A8FC9651C9F6B4E655D8B161F788174854F7118D30F37EB2516F`
+
+          Acceptance completed on the exact final EXE: isolated five-file first boot, self-materialized skin, AUTO REPAIR provisioning, manual START to a fresh `lotrbfme2ep1.exe`, 15-second stability window, and launcher handoff all passed. Release Consistency, Ticket System, and Guardian Tools CI all passed on the exact final PR head.
+
+          The legacy V18 .NET Framework `csc.exe` pipeline is byte-nondeterministic across recompiles. The exact runtime-tested EXE hash above is therefore the frozen release artifact; the canonical builder is the frozen source identity and is not expected to reproduce the same EXE SHA on later recompiles.
+
+          Historical `v1.1` remains preserved as failure provenance and is not rewritten. Launcher 1.0.10 remains the historical rollback reference.
+          EOF
+
+          gh release create v1.1.1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Launcher 1.1.1" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
