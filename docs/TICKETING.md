@@ -151,3 +151,17 @@ Priority guidance:
 - **Launcher Auto-Repair Failure** — prefilled launcher handoff after Auto-Repair is exhausted.
 
 Blank issues are disabled so support data stays structured.
+
+## Launcher integration status — 1.0.10
+
+The launcher-side ticket flow has been validated end-to-end on Windows before release promotion:
+
+- normal production launch path passed compatibility checks, 8-player runtime patches, FINAL_STABLE_V7 activation, game start, and clean launcher exit;
+- a controlled synthetic failure validated bounded Auto-Repair, one automatic retry, and `REPORT ERROR` without modifying game files;
+- launcher-generated issue #22 became `A8P-TICKET-0022` with stable fingerprint/master metadata;
+- a maintainer master-ticket reply was detected by the launcher, produced the red `MESSAGES` unread indicator, rendered correctly, and cleared locally after being read;
+- the synthetic test hook was removed from the production builder before the final normal-launch regression;
+- approved final launcher version: `1.0.10`;
+- approved final EXE SHA256: `6A80E0F7B862ABE3E0F19C3DF5ED9EE9EE730F246CF603ED00A39D1EE7DFF2F8`.
+
+Release artifacts are promoted separately so the current public launcher cannot be changed merely by merging documentation/source-validation work.
