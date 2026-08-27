@@ -197,7 +197,7 @@ $LauncherHash = Get-Sha256 $Exe
 Write-Host "CANDIDATE_SHA256=$LauncherHash" -ForegroundColor Cyan
 Write-Host "CANDIDATE_SIZE=$((Get-Item -LiteralPath $Exe).Length)" -ForegroundColor Cyan
 
-$candidateAsm = [Reflection.Assembly]::LoadFile($Exe)
+$candidateAsm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($Exe))
 $names = @($candidateAsm.GetManifestResourceNames() | Sort-Object)
 $expectedNames = @(
     "AotR8P.EngineScript","AotR8P.FinalStableV7","AotR8P.GuiScript","AotR8P.LauncherSkin",
