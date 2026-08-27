@@ -1,8 +1,30 @@
 # Launcher source baseline
 
-This directory is reserved for the authoritative source/build material for the public AotR 8P WotR launcher.
+This directory contains the authoritative source/build material for the public AotR 8P WotR launcher.
 
-## Current authoritative launcher builder
+## Current production baseline
+
+The current GitHub production baseline is launcher **1.0.10**, promoted to `main` at commit:
+
+`1303e0a6b268b082e9352ded1461fa8d794f16d3`
+
+Authoritative repository builder:
+
+`launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_0_10.ps1`
+
+Validated local Windows builder SHA256 before Git line-ending normalization:
+
+`7D847B66CAF060F3E1C5FD539DA3DF6E97865421651608CDD98898342C1BB2E0`
+
+Approved production launcher EXE SHA256:
+
+`6A80E0F7B862ABE3E0F19C3DF5ED9EE9EE730F246CF603ED00A39D1EE7DFF2F8`
+
+Git may normalize the PowerShell source from CRLF to LF when committing it. Therefore the raw repository-byte SHA256 of the text file is not expected to equal the validated local Windows builder SHA256 above; the source checkpoint records the exact tested Windows artifact.
+
+## Historical 1.0.9 / V17 reference
+
+The following information is retained as a historical working reference and rollback/research checkpoint. It is **not** the current production baseline.
 
 Local source path used for launcher 1.0.9:
 
@@ -18,7 +40,7 @@ Expected source properties:
 - SHA256: `5F806FB048BF7761252AC9D7B557B0177D71C3E9FFEA1E9003CD4DC300867E2C`
 - LastWriteTime: `2026-08-22 18:30:40` local time
 
-Both local copies were verified byte-identical before this branch was created.
+Both local copies were verified byte-identical before the original launcher-source branch was created.
 
 ## V18 / launcher 1.0.10 validation
 
@@ -66,8 +88,17 @@ Successful `-EmitGitHubBundle -BundleOnly` production build:
 
 The exact final EXE hash above was copied into a fresh isolated test package and launched normally on Windows. The final `1.0.10` build completed compatibility checks, activated the existing 8P runtime path, started AotR successfully, produced no Auto-Repair/error state, and the launcher exited cleanly after game start.
 
-This exact EXE hash is the approved production release candidate.
+This exact EXE hash is the approved production working reference.
 
 ## Safety rule
 
-The current public `1.0.9` launcher EXE, `manifest.json`, `repair-manifest.json`, `payload_ui.big`, and `payload_paper.inc` remain unchanged on `main` until the separately generated five-file `1.0.10` update bundle is deliberately promoted.
+The current `main` release files for launcher **1.0.10** are the protected working reference:
+
+- `AotR 8P WotR Mod.exe`
+- `manifest.json`
+- `repair-manifest.json`
+- `payload_ui.big`
+- `payload_paper.inc`
+- `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_0_10.ps1`
+
+Experimental or robustness work must start from or be reconciled against this V18/1.0.10 baseline before release integration. Historical V17/1.0.9 material remains a research/rollback reference and must not be deleted merely because a newer baseline exists.
