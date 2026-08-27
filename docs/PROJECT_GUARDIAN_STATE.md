@@ -8,21 +8,48 @@ This document records the current cross-component integration baseline. It is no
 
 ### Production launcher
 
-- Version: `1.1`
-- Release commit: `bbd7eff483d2cdbf3e799f764433b49195dc55b6`
-- Release tag: `v1.1`
-- GitHub Release: `Launcher 1.1`
-- Canonical 1.1 builder commit: `7072e19bd43a350da0344b1b5e32ab9d052b3404`
-- Launcher EXE SHA256: `9F2D79FC951082158D7E712E3DDDDE3A050A69CDA4A372CBF43039CB379942E4`
-- Authoritative repository builder: `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1.ps1`
-- Release Consistency: `PASS`
-- Versioned release/promotion evidence: `docs/release/LAUNCHER_1_1_RELEASE_CHECKPOINT.md`
+- Version: `1.1.1`
+- Main release commit: `303c202ffd809dbe70fb6e2611d98ce4f9773128`
+- Accepted staging commit: `19b1c5cf70c277d5892638649697c9d41d0a68ef`
+- Release tag: `v1.1.1`
+- GitHub Release: `Launcher 1.1.1`
+- Launcher EXE SHA256: `2141EA9690708EA7A61B7298AD90E0C76CC417FED996AC0CF3685276BA2A4024`
+- Manifest SHA256: `B5B499DCC5ADA8A5ED5FADE3E60248F0685CD48D61042F7487D34660F83B6830`
+- Repair-manifest SHA256: `DE45A92444E5943D9908267C5B80D1263F957E58EBC0840A6EDD00318A7741A8`
+- Authoritative repository builder: `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1_1.ps1`
+- Canonical builder SHA256: `32BCAC9D82F2A8FC9651C9F6B4E655D8B161F788174854F7118D30F37EB2516F`
+- Embedded/materialized skin SHA256: `BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6`
+- Versioned release/promotion evidence: `docs/release/LAUNCHER_1_1_1_RELEASE_CHECKPOINT.md`
 
-The automated integrity gate confirms that the versioned 1.1 EXE, manifests, payload hashes, FINAL builder presence and known repair-action set are internally consistent.
+Launcher 1.1.1 is the current stable production reference. It replaces the failed launcher 1.1 standalone release without rewriting the historical `v1.1` tag/release.
 
-The release checkpoint now also records the already-completed robustness/promotion evidence: Stage 4 resolver matrix `29/29 PASS`, Stage 10 production `PASS`, and Stage 11 exact-final-EXE launcher/config promotion gate `PASS`.
+### Exact-final runtime acceptance
 
-Evidence boundary: a separate recorded run showing the exact final 1.1 EXE hash completing the full `START -> AotR/game process -> 8P runtime/FINAL_STABLE_V7` in-game smoke path was not found. Do not infer that specific run from file-integrity or launcher-GUI evidence alone.
+The exact final EXE hash `2141EA...` passed the Issue #33 acceptance sequence from a fresh five-file public package:
+
+- no pre-existing `internal/` directory;
+- launcher opened successfully and self-materialized the exact frozen skin;
+- Auto-Repair provisioning completed; `retry_launch` behavior was observed and isolated from manual START evidence;
+- explicit manual START created a fresh `D:\Games\AotR\AgeoftheRing\rotwk\lotrbfme2ep1.exe` process;
+- exact-final game PID recorded: `12428`;
+- game survived the configured `15 s` stability window;
+- launcher handed off and exited as expected;
+- all five public release artifacts remained byte-identical through provisioning and START.
+
+The former exact-final runtime evidence gap for launcher 1.1 is therefore closed by the guarded 1.1.1 replacement release.
+
+### Build reproducibility boundary
+
+The V18 .NET Framework `csc.exe` build path is byte-nondeterministic. Two identical-input default-version 1.1.1 builds produced different EXE SHA256 values and different PE timestamps:
+
+- run 1: `F71902996345E12E37800424C60D3D4F058CFA2909E19720FF03803AFD052B68`
+- run 2: `E3CA46A516F0DCF7E231E905B0C7AFE064089E3D947848B916A14AAEDB6FA040`
+
+Both builds preserved the same release semantics, version identity, repair-manifest behavior and approved payload hashes. Therefore:
+
+- the exact runtime-tested `2141EA...` EXE is the frozen release artifact;
+- the `32BCAC...` FINAL_1_1_1 builder is the canonical source identity;
+- later recompiles are not required to reproduce the frozen EXE SHA256 byte-for-byte unless the compiler pipeline is deliberately made deterministic.
 
 ### Approved payload hashes
 
@@ -30,6 +57,22 @@ Evidence boundary: a separate recorded run showing the exact final 1.1 EXE hash 
 - `payload_paper.inc`: `3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43`
 
 ## COMPLETED / INTEGRATED
+
+### Issue #33 — standalone skin bootstrap
+
+- Owner issue: `#33`
+- Guarded release PR: `#34`
+- Status: `RESOLVED / RELEASED`
+- Root cause: the embedded GUI still expected `internal\assets\launcher_skin.png` on disk although the public release contract contained only five root artifacts.
+- Fix: the exact skin is gzip+Base64 embedded into the outer bootstrapper and SHA-verified/materialized before the embedded GUI starts.
+
+The historical launcher 1.1 release remains preserved as reproduced-failure provenance:
+
+- release commit: `bbd7eff483d2cdbf3e799f764433b49195dc55b6`
+- tag: `v1.1`
+- failed EXE SHA256: `9F2D79FC951082158D7E712E3DDDDE3A050A69CDA4A372CBF43039CB379942E4`
+
+Do not rewrite or delete that historical evidence.
 
 ### Robust AotR auto-detection
 
@@ -39,17 +82,13 @@ Evidence boundary: a separate recorded run showing the exact final 1.1 EXE hash 
 - Ownership: Launcher / Robustness
 - Research location: `research/installer/**`
 
-Before final integration, Guardian PR #28 synchronized the robustness branch to the current 1.1 production baseline without rebasing or rewriting its research history. After that sync the branch was `67` commits ahead / `0` behind `main`, with all branch-only changes confined to additions under `research/installer/**`.
-
-PR #21 was then merged as a research/documentation integration. The merge did not replace the 1.1 EXE, manifests, payloads, canonical launcher builder, ticket workflows or Guardian release files.
-
-Historical statements inside robustness checkpoints that refer to 1.0.9, 1.0.10, V17 or earlier V18 states remain valid evidence of the state when those experiments were performed. Do not silently rewrite them as if they described the current release.
+Historical robustness checkpoints intentionally retain the assumptions and intermediate failures that were true when each experiment was performed. Do not silently rewrite them as if they described the current release.
 
 ## CROSS-COMPONENT OWNERSHIP
 
 | Component | Primary owner | Guardian rule |
 | --- | --- | --- |
-| Launcher path/install detection | Launcher / Robustness | Integrated in the 1.1 workstream; future changes start from current production baseline |
+| Launcher path/install detection | Launcher / Robustness | Integrated in the 1.1.1 production line; future changes start from current production baseline |
 | Auto-Repair / launcher process handling | Launcher / Robustness | Cross-component because ticket reporting consumes repair results |
 | GitHub ticket creation/triage/clustering | Ticket System | Do not change launcher runtime unless coordinated |
 | `REPORT ERROR` / support bundle / Messages | Ticket System + Launcher integration | Regression gate for future launcher builds |
@@ -77,45 +116,55 @@ Local equivalents of the launcher builder, runtime patch inputs, `game.dat`, BIG
 ## SOURCES OF TRUTH
 
 1. `main` is the source of truth for currently versioned project/release files.
-2. Tag `v1.1`, release commit `bbd7eff...`, and the exact release SHA256 identify launcher 1.1 independently of later documentation/research merges to `main`.
-3. `docs/release/LAUNCHER_1_1_RELEASE_CHECKPOINT.md` is the compact versioned launcher 1.1 promotion/evidence checkpoint.
-4. Local reverse-engineering workspaces may contain newer research and experimental artifacts; they are additional evidence, not automatically production truth.
-5. Reproducible runtime tests override older assumptions when the test conditions and tested hash are documented.
-6. Historical working builds and failed experiments remain references unless explicitly classified otherwise.
+2. Tag `v1.1.1`, release commit `303c202f...`, and EXE SHA256 `2141EA...` identify the current launcher production release independently of later documentation/cleanup merges to `main`.
+3. `docs/release/LAUNCHER_1_1_1_RELEASE_CHECKPOINT.md` is the compact versioned launcher 1.1.1 promotion/evidence checkpoint.
+4. Tag `v1.1` and EXE SHA `9F2D79...` are historical reproduced-failure provenance, not a current working baseline.
+5. Launcher 1.0.10 EXE SHA `6A80E0F7B862ABE3E0F19C3DF5ED9EE9EE730F246CF603ED00A39D1EE7DFF2F8` remains the historical known-good rollback reference.
+6. Reproducible runtime tests override older assumptions when the test conditions and tested hash are documented.
+7. Historical working builds and failed experiments remain references unless explicitly classified otherwise.
 
 ## CURRENT INTEGRATION GATES
 
 A future launcher build must demonstrate at minimum:
 
-- clean normal launch from a fresh isolated package;
+- clean normal launch from a fresh isolated public package;
+- no unintended runtime dependency on research/build-tree-only assets;
 - existing compatibility checks still pass;
 - existing 8-player runtime patches and FINAL_STABLE_V7 still activate correctly;
 - robust install detection does not select runtime/research/backup copies as production installs;
 - ambiguous top candidates fail safely instead of choosing arbitrarily;
-- Auto-Repair remains bounded and does not modify files while the game or another launcher/update operation owns them;
-- `REPORT ERROR` appears only after repair exhaustion;
-- support fingerprint/bundle behavior remains intact;
-- launcher `MESSAGES` behavior remains intact;
+- Auto-Repair remains bounded and preserves its intended retry behavior;
+- `REPORT ERROR`, support fingerprint/bundle and `MESSAGES` behavior remain intact;
 - release EXE and payload hashes match the manifests;
-- the exact final EXE hash used for release is tied to the recorded regression result;
-- rollback to the 1.1 working reference remains possible, with 1.0.10 retained as a historical rollback reference.
+- the exact final EXE hash used for release is tied to recorded runtime acceptance;
+- the canonical builder source identity is recorded separately from the frozen EXE hash while the legacy compiler remains byte-nondeterministic;
+- rollback references remain preserved.
 
-## CI / PROTECTION TARGET
+## CI / PROTECTION
 
-The two checks intended for required-status-check protection use distinct names:
+Repository ruleset `Protect Main` is active for `main` and the default branch. It enforces:
 
-- `release-consistency`
-- `ticket-system`
+- pull-request-only updates;
+- review-thread resolution;
+- deletion protection;
+- non-fast-forward / force-push protection;
+- strict required-status policy;
+- no bypass actors;
+- required checks:
+  - `release-consistency`
+  - `ticket-system`
+  - `guardian-tools`
 
-Once branch protection/rulesets are enabled for `main`, require pull requests and these checks for relevant changes. Repository administration is an account-level setting and is not controlled by project source files.
+The Issue #33 exact-final release head, the v1.1.1 publisher PR and the publisher-cleanup PR all passed all three required checks before merge.
 
 ## CLEANUP CLASSIFICATION
 
 Current policy:
 
-- launcher 1.1 release EXE/manifests/payloads: `KEEP / WORKING_REFERENCE`
-- `BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1.ps1`: `KEEP / WORKING_REFERENCE`
-- launcher 1.0.10 final builder/release evidence: `WORKING_REFERENCE / HISTORICAL_ROLLBACK`
+- launcher 1.1.1 EXE/manifests/payloads: `KEEP / CURRENT_PRODUCTION`
+- `BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1_1.ps1`: `KEEP / CURRENT_CANONICAL_SOURCE`
+- launcher 1.1 release/tag/builder/evidence: `KEEP / HISTORICAL_FAILURE_PROVENANCE`
+- launcher 1.0.10 final builder/release evidence: `KEEP / HISTORICAL_ROLLBACK`
 - V17 / 1.0.9 validated material: `RESEARCH_REFERENCE / ARCHIVE`, not delete-on-sight
 - `research/installer/**`: `RESEARCH_REFERENCE / KEEP`
 - merged feature/fix branches: `REVIEW_REQUIRED` before any branch deletion
@@ -123,16 +172,12 @@ Current policy:
 
 ## OPEN GUARDIAN RISKS
 
-### HIGH — repository administration
+### CONTROLLED — legacy compiler byte nondeterminism
 
-- `main` currently lacks branch protection/rulesets. Direct release-changing pushes can bypass PR review despite CI running afterward. This requires a GitHub repository administration setting; the connected project integration has read-only visibility for branch protection and cannot change that account-level setting itself.
+The current V18 builder line does not produce byte-identical EXEs across repeated compiles. This is documented and controlled by freezing the exact runtime-tested release EXE separately from the canonical source builder. Do not silently substitute a later recompile into a release solely because it came from the same source.
 
-### MEDIUM — exact-final in-game smoke evidence
+### HISTORICAL — launcher 1.1 standalone defect
 
-- The launcher 1.1 release/promotion checkpoint now exists and records the exact final artifact plus the already-completed Stage 4/10/11 evidence. What remains unrecorded is specifically the exact final 1.1 hash completing a full `START -> AotR/game -> 8P runtime/FINAL_STABLE_V7` smoke path.
+Launcher 1.1 remains intentionally preserved as failure provenance for Issue #33. It must not be reclassified as a working rollback reference. Launcher 1.0.10 remains the historical known-good rollback if a rollback older than 1.1.1 is required.
 
-### HISTORICAL NOTE — not a current release defect
-
-- The canonical 1.1 builder inherits a top source comment that says `V18 FINAL 1.0.10`, while its actual `LauncherVersion` parameter is correctly `1.1`. The released builder source is retained unchanged because mutating the canonical tested source solely for cosmetic text would weaken artifact provenance. Correct the inherited comment in the next deliberate builder revision.
-
-See Guardian issue `#25` for the two remaining non-source actions.
+There is no remaining open release blocker from Guardian issues #25/#33 for launcher 1.1.1.
