@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_for_launcher": "1.1",
+  "generated_for_launcher": "1.1.1",
   "plans": {
     "A8P-INSTALL-001": {
       "actions": [
