@@ -31,6 +31,9 @@ jobs:
       - name: Build and Defender-scan clean 1.1.2 candidate
         shell: powershell
         run: |
+          # The V19 runner currently constructs one regex in a double-quoted string.
+          # Seed the referenced name as its own literal so StrictMode cannot treat it as undefined.
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
           .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
             -FrozenDonorRoot .\donor-v1.1.1 `
             -OutputRoot .\_V19_1_1_2_BUILD `
