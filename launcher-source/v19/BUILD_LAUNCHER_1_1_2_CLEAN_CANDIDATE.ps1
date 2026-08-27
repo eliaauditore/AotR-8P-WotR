@@ -121,8 +121,8 @@ if ($LASTEXITCODE -ne 0) { throw "GUI/engine clean resource transform failed" }
 if ($LASTEXITCODE -ne 0) { throw "FINAL_STABLE_V7 clean resource transform failed" }
 
 Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "201B90D474AE39EE7776159A79AC025C80C6E95BB263D1CBF53152B3784895EF" "Clean GUI"
-Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12" "Clean engine"
-Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED" "Clean FINAL_STABLE_V7"
+Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "083DF914744BF9B78B3D0946337AA6C39C9FA2B980B8EF32094B3575E9A1557E" "Clean engine"
+Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2" "Clean FINAL_STABLE_V7"
 Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"
 
 foreach ($path in @(

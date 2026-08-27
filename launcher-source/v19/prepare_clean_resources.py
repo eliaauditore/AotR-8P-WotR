@@ -11,7 +11,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 EXPECTED_GUI_IN = "23880AF22E3D0121EE79FE14CAA21799BFBE105397E4C66DC21E641D50DAD09C"
 EXPECTED_ENGINE_IN = "94A71026D6A35998D0338DA0FDF9D478DDD92A76C382F23E109B13286F3F5AAA"
 EXPECTED_GUI_OUT = "201B90D474AE39EE7776159A79AC025C80C6E95BB263D1CBF53152B3784895EF"
-EXPECTED_ENGINE_OUT = "95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12"
+EXPECTED_ENGINE_OUT = "083DF914744BF9B78B3D0946337AA6C39C9FA2B980B8EF32094B3575E9A1557E"
 
 
 def sha(path: Path) -> str:
@@ -221,9 +221,13 @@ engine = replace_once(engine, '''    $bytes = [Convert]::FromBase64String(($Fina
 
 ''', "FINAL_STABLE_V7 resource consumption")
 
+engine = replace_once(engine, '        [void]$v7.AddParameter("DragSpeed", [single]-16.0)\n', '''        [void]$v7.AddParameter("DragSpeed", [single]-16.0)
+        [void]$v7.AddParameter("V7Shellcode", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)
+''', "V7 child shellcode parameter")
+
 required_gui = ("System.Net.Http.HttpClient", "AOTR8P_SKIN_BYTES", "AOTR8P_ROW1_PATCH", "AOTR8P_FINAL_STABLE_V7_BYTES", "Get-HttpText", "Save-HttpFile")
 forbidden_gui = ("Net.WebClient", "DownloadString(", "DownloadFile(", "FromBase64String", "Row1CleanPatchBase64", "ReadyCleanPatchBase64", "internal\\assets\\launcher_skin.png", "$Skin =")
-required_engine = ("AOTR8P_FINAL_STABLE_V7_BYTES",)
+required_engine = ("AOTR8P_FINAL_STABLE_V7_BYTES", "AOTR8P_V7_SHELLCODE_BYTES", "V7Shellcode")
 forbidden_engine = ("FinalStableV7Base64", "FromBase64String")
 
 for token in required_gui:

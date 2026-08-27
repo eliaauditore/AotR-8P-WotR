@@ -10,7 +10,7 @@ OUT_SHELLCODE = Path(sys.argv[3])
 
 EXPECTED_INPUT = "FEAF40B3B231646CD8F7C7099D1E8544090D5010F1C6DB06E5B2F3EF8C0C5F44"
 EXPECTED_SHELLCODE = "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A"
-EXPECTED_OUTPUT = "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED"
+EXPECTED_OUTPUT = "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2"
 EXPECTED_LENGTH = 1577
 
 
@@ -27,6 +27,11 @@ if sha_bytes(raw) != EXPECTED_INPUT:
     raise SystemExit("FINAL_STABLE_V7 frozen input hash mismatch")
 
 text = raw.decode("utf-8-sig").replace("\r\n", "\n")
+param_anchor = "    [single]$DragSpeed = -16.0\n)"
+param_replacement = "    [single]$DragSpeed = -16.0,\n    [Parameter(Mandatory=$true)]\n    [byte[]]$V7Shellcode\n)"
+if text.count(param_anchor) != 1:
+    raise SystemExit("V7 parameter block anchor is not unique")
+text = text.replace(param_anchor, param_replacement, 1)
 pattern = r"(?ms)^\$ShellcodeBase64\s*=\s*@'\n(.*?)\n'@\n\[byte\[\]\]\$ShellcodeTemplate\s*=\s*\[Convert\]::FromBase64String\(\(\$ShellcodeBase64\s+-replace\s+'\\s',\s*''\)\)\n"
 match = re.search(pattern, text)
 if not match:
@@ -40,7 +45,7 @@ if len(payload) != EXPECTED_LENGTH:
 if sha_bytes(payload) != EXPECTED_SHELLCODE:
     raise SystemExit("V7 shellcode SHA256 mismatch")
 
-replacement = '''[byte[]]$ShellcodeTemplate = [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES
+replacement = '''[byte[]]$ShellcodeTemplate = [byte[]]$V7Shellcode
 if ($null -eq $ShellcodeTemplate -or $ShellcodeTemplate.Length -eq 0) {
     throw "Interner V7-Shellcode-Resource fehlt."
 }
@@ -49,8 +54,10 @@ text = re.sub(pattern, replacement, text, count=1)
 
 if "FromBase64String" in text or "ShellcodeBase64" in text:
     raise SystemExit("Legacy V7 Base64 decoder remains")
-if "AOTR8P_V7_SHELLCODE_BYTES" not in text:
-    raise SystemExit("Managed V7 shellcode resource handoff missing")
+if "$V7Shellcode" not in text:
+    raise SystemExit("Explicit V7 shellcode parameter missing")
+if "AOTR8P_V7_SHELLCODE_BYTES" in text:
+    raise SystemExit("V7 child still depends on parent global scope")
 
 OUT_SCRIPT.parent.mkdir(parents=True, exist_ok=True)
 OUT_SHELLCODE.parent.mkdir(parents=True, exist_ok=True)
