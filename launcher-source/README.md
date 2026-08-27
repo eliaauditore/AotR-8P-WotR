@@ -4,85 +4,128 @@ This directory contains the authoritative source/build material for the public A
 
 ## Current production baseline
 
-The current GitHub production baseline is launcher **1.1**.
+The current GitHub production baseline is launcher **1.1.1**.
 
-Release commit:
+Public release identity:
 
-`bbd7eff483d2cdbf3e799f764433b49195dc55b6`
-
-Canonical 1.1 builder commit:
-
-`7072e19bd43a350da0344b1b5e32ab9d052b3404`
-
-Authoritative repository builder:
-
-`launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1.ps1`
-
-Approved production launcher EXE SHA256:
-
-`9F2D79FC951082158D7E712E3DDDDE3A050A69CDA4A372CBF43039CB379942E4`
-
-The repository Release Consistency workflow passed for the canonical 1.1 builder commit and verified the versioned EXE hash, payload hashes, repair-manifest version/action set, and presence of the FINAL 1.1 builder.
-
-### Runtime-evidence boundary
-
-The repository integrity gate proves file/metadata consistency. It does **not** by itself prove launcher/game runtime behavior. At the current Guardian checkpoint, no versioned document was found that explicitly ties the complete final runtime regression matrix to the exact final 1.1 EXE hash above. That evidence remains `REVIEW_REQUIRED` until recorded or located.
-
-### Source-comment note
-
-The canonical `FINAL_1_1` builder inherits an introductory source comment that says `V18 FINAL 1.0.10`, while its actual default `LauncherVersion` parameter is `1.1` and the release consistency gate identifies it as the current 1.1 FINAL builder. This is non-functional historical comment metadata.
-
-Do **not** modify the already released canonical builder solely to cosmetically change that comment. Correct it in the next deliberate builder revision while preserving this exact 1.1 source as a working reference.
-
-## Historical 1.0.10 / V18 reference
-
-Launcher 1.0.10 remains a historical working/rollback reference. It is **not** the current production baseline.
-
-Release commit:
-
-`1303e0a6b268b082e9352ded1461fa8d794f16d3`
+- Main release commit: `303c202ffd809dbe70fb6e2611d98ce4f9773128`
+- Accepted staging commit: `19b1c5cf70c277d5892638649697c9d41d0a68ef`
+- Release tag: `v1.1.1`
+- GitHub Release: `Launcher 1.1.1`
+- Launcher EXE SHA256: `2141EA9690708EA7A61B7298AD90E0C76CC417FED996AC0CF3685276BA2A4024`
+- Manifest SHA256: `B5B499DCC5ADA8A5ED5FADE3E60248F0685CD48D61042F7487D34660F83B6830`
+- Repair-manifest SHA256: `DE45A92444E5943D9908267C5B80D1263F957E58EBC0840A6EDD00318A7741A8`
+- UI SHA256: `827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376`
+- Paper SHA256: `3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43`
+- Embedded/materialized skin SHA256: `BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6`
 
 Authoritative repository builder:
 
-`launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_0_10.ps1`
+`launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1_1.ps1`
 
-Validated local Windows builder SHA256 before Git line-ending normalization:
+Canonical FINAL_1_1_1 builder SHA256:
 
-`7D847B66CAF060F3E1C5FD539DA3DF6E97865421651608CDD98898342C1BB2E0`
+`32BCAC9D82F2A8FC9651C9F6B4E655D8B161F788174854F7118D30F37EB2516F`
 
-Approved 1.0.10 launcher EXE SHA256:
+The repository Release Consistency, Ticket System and Guardian Tools workflows all passed on the exact final PR head before promotion.
 
-`6A80E0F7B862ABE3E0F19C3DF5ED9EE9EE730F246CF603ED00A39D1EE7DFF2F8`
+## Exact-final runtime acceptance
 
-The exact 1.0.10 EXE hash above was previously regression-tested from a fresh isolated package: compatibility checks passed, the existing 8-player runtime path activated, AotR started successfully, and the launcher exited cleanly after game start. Its ticket-system E2E path was also validated through the RC5/RC6 checkpoint sequence.
+Launcher 1.1.1 closes the standalone-bootstrap defect tracked in Issue #33. The exact frozen EXE `2141EA...` was tested from a fresh package containing only the five intended public release artifacts.
 
-Git may normalize PowerShell source from CRLF to LF when committing text. Therefore a raw repository-byte SHA256 of a builder source file is not automatically expected to equal a separately recorded local Windows source hash unless the byte representation is explicitly preserved.
+Recorded acceptance:
+
+- no pre-existing `internal/` directory;
+- launcher opened successfully;
+- bootstrap self-materialized `internal\assets\launcher_skin.png` with the exact frozen skin SHA;
+- Auto-Repair provisioning completed, including the intended `retry_launch` behavior;
+- the provisioning-launched game was explicitly separated from manual START evidence;
+- a fresh launcher instance then reached all required `OK` rows;
+- explicit manual START created a new `D:\Games\AotR\AgeoftheRing\rotwk\lotrbfme2ep1.exe` process;
+- exact-final game PID: `12428`;
+- game survived the configured `15 s` stability window;
+- launcher handed off and exited as expected;
+- all five public release files remained byte-identical through provisioning and START.
+
+The earlier exact-final runtime-evidence gap recorded for launcher 1.1 is therefore closed by launcher 1.1.1.
+
+Versioned checkpoint:
+
+`docs/release/LAUNCHER_1_1_1_RELEASE_CHECKPOINT.md`
+
+## Standalone skin fix
+
+Launcher 1.1 failed before START because the embedded GUI still expected the build-tree path:
+
+`internal\assets\launcher_skin.png`
+
+while the public release contract contained only five flat root artifacts.
+
+Launcher 1.1.1 keeps the skin as a build-time input but gzip+Base64 embeds its exact bytes into the outer C# bootstrapper. An explicit static `Program` constructor SHA-verifies and materializes the skin before the embedded GUI executes.
+
+The embedded GUI and ENGINE payload bytes from the accepted V18 baseline remain unchanged.
+
+## Build reproducibility boundary
+
+The legacy V18 .NET Framework `csc.exe` path is **byte-nondeterministic** across repeated compiles.
+
+Two identical-input 1.1.1 default-version builds produced different EXE hashes:
+
+- `F71902996345E12E37800424C60D3D4F058CFA2909E19720FF03803AFD052B68`
+- `E3CA46A516F0DCF7E231E905B0C7AFE064089E3D947848B916A14AAEDB6FA040`
+
+and different PE timestamps while preserving the same launcher/product version, manifest semantics, repair behavior and approved payload hashes.
+
+Therefore the project records two separate identities:
+
+1. **Frozen release artifact:** exact runtime-tested EXE SHA `2141EA...`.
+2. **Canonical source identity:** FINAL_1_1_1 builder SHA `32BCAC...`.
+
+A later compile from the same source is not expected to reproduce `2141EA...` byte-for-byte unless the compiler pipeline is deliberately made deterministic. Never silently substitute a later recompile into the release solely because the source is the same.
+
+## Historical launcher 1.1 failure provenance
+
+Launcher 1.1 is **not** the current production baseline and is **not** a known-good rollback reference.
+
+Preserve it as reproduced-failure evidence for Issue #33:
+
+- release commit: `bbd7eff483d2cdbf3e799f764433b49195dc55b6`
+- tag: `v1.1`
+- GitHub Release: `Launcher 1.1`
+- failed standalone EXE SHA256: `9F2D79FC951082158D7E712E3DDDDE3A050A69CDA4A372CBF43039CB379942E4`
+- historical builder: `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1.ps1`
+
+Do not rewrite the historical tag/release or delete its source/evidence merely because 1.1.1 supersedes it.
+
+## Historical 1.0.10 / V18 rollback reference
+
+Launcher 1.0.10 remains the historical known-good rollback reference older than 1.1.1.
+
+- release commit: `1303e0a6b268b082e9352ded1461fa8d794f16d3`
+- builder: `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_0_10.ps1`
+- EXE SHA256: `6A80E0F7B862ABE3E0F19C3DF5ED9EE9EE730F246CF603ED00A39D1EE7DFF2F8`
+
+The exact 1.0.10 EXE was previously regression-tested from a fresh isolated package: compatibility checks passed, the existing 8-player runtime path activated, AotR started successfully, and the launcher exited cleanly after game start. Its ticket-system E2E path was also validated through the RC5/RC6 checkpoint sequence.
 
 ## Historical 1.0.9 / V17 reference
 
-The following information is retained as an older working research/rollback checkpoint. It is **not** the current production baseline.
+The validated 1.0.9/V17 material remains older research/rollback evidence and is not current production.
 
-Local source path used for launcher 1.0.9:
+Local source reference:
 
 `D:\BFME_RESEARCH\05_REVERSE_ENGINEERING\AOTR_8P_WOTR_MOD\BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V17_LAN_UI_POLISH.ps1`
 
-Verified duplicate release snapshot:
+Verified historical source properties:
 
-`D:\BFME_RESEARCH\05_REVERSE_ENGINEERING\RELEASE_1_0_9_UI_POLISH_20260822_183040\BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V17_LAN_UI_POLISH.ps1`
-
-Expected source properties:
-
-- Size: `249043` bytes
+- size: `249043` bytes
 - SHA256: `5F806FB048BF7761252AC9D7B557B0177D71C3E9FFEA1E9003CD4DC300867E2C`
-- LastWriteTime: `2026-08-22 18:30:40` local time
 
-Both local copies were verified byte-identical before the original launcher-source branch was created.
+## Stable launcher behavior carried forward
 
-## Stable launcher behavior carried forward from the validated V18 line
+The current production line preserves the validated launcher behavior required by future regressions:
 
-The validated launcher line includes:
-
-- the existing 8-player runtime path and FINAL_STABLE_V7;
+- existing 8-player runtime path and FINAL_STABLE_V7;
+- robust AotR Config V2 discovery/validation;
 - local `A8P-FP-*` fingerprint generation;
 - privacy-safe support-bundle generation;
 - bounded Auto-Repair and retry behavior;
@@ -90,10 +133,11 @@ The validated launcher line includes:
 - prefilled GitHub issue reporting without an embedded write token;
 - `MESSAGES` with local unread state and master-ticket updates;
 - dynamic launcher status rows;
+- custom topbar behavior;
 - PowerShell 7 build-host compatibility via the Windows PowerShell automation assembly;
 - .NET SHA256 implementations in embedded runspaces rather than relying on `Get-FileHash`.
 
-These carried-forward behaviors are regression requirements for future launcher builds. Their presence in prior validated versions must not be treated as automatic proof that an untested later EXE behaves identically; test the exact final release hash and record the result.
+Their presence in prior versions is not automatic proof for a future EXE. Test the exact final release artifact and record its identity.
 
 ## Robust auto-detection research
 
@@ -105,15 +149,22 @@ Historical files in that directory intentionally retain the assumptions and inte
 
 ## Safety rule
 
-The current 1.1 working reference consists of:
+The current 1.1.1 production working set is:
 
 - `AotR 8P WotR Mod.exe`
 - `manifest.json`
 - `repair-manifest.json`
 - `payload_ui.big`
 - `payload_paper.inc`
-- `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1.ps1`
+- `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1_1.ps1`
 
-Do not overwrite these files as part of unrelated research or cleanup. Future release work must start from or explicitly reconcile against the current production baseline, pass the Release Consistency gate, document the exact final EXE hash, and preserve a rollback path.
+Do not overwrite these files as part of unrelated research or cleanup.
 
-The 1.0.10 and 1.0.9/V17 materials remain historical working/research references and must not be deleted merely because 1.1 is newer.
+Future release work must:
+
+- start from or explicitly reconcile against the current production baseline;
+- pass `release-consistency`, `ticket-system` and `guardian-tools`;
+- test and freeze the exact final EXE hash;
+- document the exact final runtime result;
+- preserve the canonical builder/source identity separately;
+- preserve historical failure and rollback references.
