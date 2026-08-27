@@ -10,8 +10,8 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 EXPECTED_GUI_IN = "23880AF22E3D0121EE79FE14CAA21799BFBE105397E4C66DC21E641D50DAD09C"
 EXPECTED_ENGINE_IN = "94A71026D6A35998D0338DA0FDF9D478DDD92A76C382F23E109B13286F3F5AAA"
-EXPECTED_GUI_OUT = "3B7343182D71101C0E526B8779C447EC800F914287AE7CD24E493571D24C424A"
-EXPECTED_ENGINE_OUT = "92829D0DC7DC186B1B19CC1A81699A240F39C3FB12131A295098846127B7DBFF"
+EXPECTED_GUI_OUT = "74A57F88A4BFF3C2E02B4C158DD3EC42173A623A27813E59815C352C4F566C7D"
+EXPECTED_ENGINE_OUT = "A2E3545A040503E47237E3869E8F5D3A25FB857C007DA11C17386481D45817EC"
 
 
 def sha(path: Path) -> str:
@@ -72,32 +72,11 @@ function Save-HttpFile([string]$Url,[string]$Destination) {
 }
 '''
 
-gui = replace_once(
-    gui,
-    "Add-Type -AssemblyName System.Windows.Forms\n",
-    http_helpers,
-    "HTTP helper insertion",
-)
-gui = replace_once(
-    gui,
-    '$Skin = Join-Path $packageRoot "internal\\assets\\launcher_skin.png"\n',
-    "",
-    "legacy skin path removal",
-)
+gui = replace_once(gui, "Add-Type -AssemblyName System.Windows.Forms\n", http_helpers, "HTTP helper insertion")
+gui = replace_once(gui, '$Skin = Join-Path $packageRoot "internal\\assets\\launcher_skin.png"\n', "", "legacy skin path removal")
 
-for variable in (
-    "Row1CleanPatchBase64",
-    "Row2CleanPatchBase64",
-    "Row3CleanPatchBase64",
-    "ReadyCleanPatchBase64",
-):
-    gui = regex_once(
-        gui,
-        rf'^\${variable}\s*=\s*"[^"]*"\n',
-        "",
-        f"remove {variable}",
-        re.M,
-    )
+for variable in ("Row1CleanPatchBase64", "Row2CleanPatchBase64", "Row3CleanPatchBase64", "ReadyCleanPatchBase64"):
+    gui = regex_once(gui, rf'^\${variable}\s*=\s*"[^"]*"\n', "", f"remove {variable}", re.M)
 
 legacy_image_block = '''$bitmap = New-Object Windows.Media.Imaging.BitmapImage
 $bitmap.BeginInit()
@@ -153,24 +132,17 @@ Set-EmbeddedPngSource $ReadyCleanPatch ([byte[]]$global:AOTR8P_READY_PATCH)
 '''
 gui = replace_once(gui, legacy_image_block, managed_image_block, "managed image resources")
 
-gui = replace_once(
-    gui,
-    '''    try {
+gui = replace_once(gui, '''    try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $wc = New-Object Net.WebClient
         $wc.Headers["User-Agent"] = "AotR-8P-WotR-Launcher/$($global:AOTR8P_LAUNCHER_VERSION)"
         $wc.CachePolicy = New-Object System.Net.Cache.RequestCachePolicy([System.Net.Cache.RequestCacheLevel]::NoCacheNoStore)
         $json = $wc.DownloadString($RepairManifestUrl)
-''',
-    '''    try {
+''', '''    try {
         $json = Get-HttpText $RepairManifestUrl
-''',
-    "remote repair HTTP",
-)
+''', "remote repair HTTP")
 
-gui = replace_once(
-    gui,
-    '''function New-GitHubWebClient {
+gui = replace_once(gui, '''function New-GitHubWebClient {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $wc = New-Object Net.WebClient
     $wc.Headers["User-Agent"] = "AotR-8P-WotR-Launcher/$($global:AOTR8P_LAUNCHER_VERSION)"
@@ -179,36 +151,21 @@ gui = replace_once(
     return $wc
 }
 
-''',
-    "",
-    "legacy GitHub WebClient helper",
-)
+''', "", "legacy GitHub WebClient helper")
 
-gui = replace_once(
-    gui,
-    '''        $wc = New-GitHubWebClient
+gui = replace_once(gui, '''        $wc = New-GitHubWebClient
         $query = [Uri]::EscapeDataString('repo:eliaauditore/AotR-8P-WotR label:master-ticket "' + $Fingerprint + '"')
         $result = $wc.DownloadString("https://api.github.com/search/issues?q=$query&per_page=10") | ConvertFrom-Json
-''',
-    '''        $query = [Uri]::EscapeDataString('repo:eliaauditore/AotR-8P-WotR label:master-ticket "' + $Fingerprint + '"')
+''', '''        $query = [Uri]::EscapeDataString('repo:eliaauditore/AotR-8P-WotR label:master-ticket "' + $Fingerprint + '"')
         $result = Get-HttpText ("https://api.github.com/search/issues?q=$query&per_page=10") | ConvertFrom-Json
-''',
-    "master ticket lookup HTTP",
-)
+''', "master ticket lookup HTTP")
 
-gui = replace_once(
-    gui,
-    '''        $wc = New-GitHubWebClient
+gui = replace_once(gui, '''        $wc = New-GitHubWebClient
         $comments = @($wc.DownloadString("$GitHubApiRoot/issues/$MasterIssue/comments?per_page=100") | ConvertFrom-Json)
-''',
-    '''        $comments = @(Get-HttpText ("$GitHubApiRoot/issues/$MasterIssue/comments?per_page=100") | ConvertFrom-Json)
-''',
-    "maintainer comments HTTP",
-)
+''', '''        $comments = @(Get-HttpText ("$GitHubApiRoot/issues/$MasterIssue/comments?per_page=100") | ConvertFrom-Json)
+''', "maintainer comments HTTP")
 
-gui = replace_once(
-    gui,
-    '''    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+gui = replace_once(gui, '''    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $parent = Split-Path $Destination -Parent
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $temp = Join-Path $parent (".repair_" + [Guid]::NewGuid().ToString("N") + ".tmp")
@@ -217,55 +174,30 @@ gui = replace_once(
         $wc.Headers["User-Agent"] = "AotR-8P-WotR-Launcher/$($global:AOTR8P_LAUNCHER_VERSION)"
         $wc.CachePolicy = New-Object System.Net.Cache.RequestCachePolicy([System.Net.Cache.RequestCacheLevel]::NoCacheNoStore)
         $wc.DownloadFile($Url,$temp)
-''',
-    '''    $parent = Split-Path $Destination -Parent
+''', '''    $parent = Split-Path $Destination -Parent
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $temp = Join-Path $parent (".repair_" + [Guid]::NewGuid().ToString("N") + ".tmp")
     try {
         Save-HttpFile $Url $temp
-''',
-    "verified download HTTP",
-)
+''', "verified download HTTP")
 
-gui = replace_once(
-    gui,
-    '''function Repair-ModPayloads {
+gui = replace_once(gui, '''function Repair-ModPayloads {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $wc = New-Object Net.WebClient
     $wc.Headers["User-Agent"] = "AotR-8P-WotR-Launcher/$($global:AOTR8P_LAUNCHER_VERSION)"
     $wc.CachePolicy = New-Object System.Net.Cache.RequestCachePolicy([System.Net.Cache.RequestCacheLevel]::NoCacheNoStore)
     $manifest = ($wc.DownloadString($ModManifestUrl) | ConvertFrom-Json)
-''',
-    '''function Repair-ModPayloads {
+''', '''function Repair-ModPayloads {
     $manifest = (Get-HttpText $ModManifestUrl | ConvertFrom-Json)
-''',
-    "mod manifest HTTP",
-)
+''', "mod manifest HTTP")
 
-gui = replace_once(
-    gui,
-    '        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)\n',
-    '''        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)
+gui = replace_once(gui, '        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)\n', '''        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)
         $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_FINAL_STABLE_V7_BYTES", [byte[]]$global:AOTR8P_FINAL_STABLE_V7_BYTES)
-''',
-    "engine resource handoff",
-)
+''', "engine resource handoff")
 
-engine = replace_once(
-    engine,
-    "#   - installs byte-identical FINAL_STABLE_V7 via a real temporary PowerShell script\n",
-    "#   - installs byte-identical FINAL_STABLE_V7 from a verified launcher resource\n",
-    "engine source comment",
-)
-engine = regex_once(
-    engine,
-    r"(?ms)^\$FinalStableV7Base64\s*=\s*@'\n.*?^'@\n",
-    "",
-    "FINAL_STABLE_V7 Base64 removal",
-)
-engine = replace_once(
-    engine,
-    '''    $bytes = [Convert]::FromBase64String(($FinalStableV7Base64 -replace '\\s',''))
+engine = replace_once(engine, "#   - installs byte-identical FINAL_STABLE_V7 via a real temporary PowerShell script\n", "#   - installs byte-identical FINAL_STABLE_V7 from a verified launcher resource\n", "engine source comment")
+engine = regex_once(engine, r"(?ms)^\$FinalStableV7Base64\s*=\s*@'\n.*?^'@\n", "", "FINAL_STABLE_V7 Base64 removal")
+engine = replace_once(engine, '''    $bytes = [Convert]::FromBase64String(($FinalStableV7Base64 -replace '\\s',''))
     $embeddedHash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
     ).Replace("-","")
@@ -274,8 +206,7 @@ engine = replace_once(
         throw "Eingebettetes FINAL_STABLE_V7 ist beschaedigt."
     }
 
-''',
-    '''    $bytes = [byte[]]$global:AOTR8P_FINAL_STABLE_V7_BYTES
+''', '''    $bytes = [byte[]]$global:AOTR8P_FINAL_STABLE_V7_BYTES
     if ($null -eq $bytes -or $bytes.Length -eq 0) {
         throw "FINAL_STABLE_V7 resource is missing."
     }
@@ -286,28 +217,10 @@ engine = replace_once(
         throw "FINAL_STABLE_V7 resource hash mismatch."
     }
 
-''',
-    "FINAL_STABLE_V7 resource consumption",
-)
+''', "FINAL_STABLE_V7 resource consumption")
 
-required_gui = (
-    "System.Net.Http.HttpClient",
-    "AOTR8P_SKIN_BYTES",
-    "AOTR8P_ROW1_PATCH",
-    "AOTR8P_FINAL_STABLE_V7_BYTES",
-    "Get-HttpText",
-    "Save-HttpFile",
-)
-forbidden_gui = (
-    "Net.WebClient",
-    "DownloadString(",
-    "DownloadFile(",
-    "FromBase64String",
-    "Row1CleanPatchBase64",
-    "ReadyCleanPatchBase64",
-    "internal\\assets\\launcher_skin.png",
-    "$Skin =",
-)
+required_gui = ("System.Net.Http.HttpClient", "AOTR8P_SKIN_BYTES", "AOTR8P_ROW1_PATCH", "AOTR8P_FINAL_STABLE_V7_BYTES", "Get-HttpText", "Save-HttpFile")
+forbidden_gui = ("Net.WebClient", "DownloadString(", "DownloadFile(", "FromBase64String", "Row1CleanPatchBase64", "ReadyCleanPatchBase64", "internal\\assets\\launcher_skin.png", "$Skin =")
 required_engine = ("AOTR8P_FINAL_STABLE_V7_BYTES",)
 forbidden_engine = ("FinalStableV7Base64", "FromBase64String")
 
@@ -324,8 +237,12 @@ for token in forbidden_engine:
     if token in engine:
         raise SystemExit("Forbidden engine token remains: " + token)
 
-(OUT_DIR / "launcher_gui.ps1").write_text(gui, encoding="utf-8", newline="\n")
-(OUT_DIR / "launcher_engine.ps1").write_text(engine, encoding="utf-8", newline="\n")
+# Windows PowerShell 5.1 interprets BOM-less UTF-8 files as ANSI. Some UTF-8 punctuation
+# (notably em dashes) then decodes into smart-quote characters that the PS parser treats
+# as string delimiters. Emit a BOM so file-based CI parsing sees the same Unicode text that
+# the launcher supplies to AddScript(). ReadEmbeddedUtf8() strips the BOM before execution.
+(OUT_DIR / "launcher_gui.ps1").write_text(gui, encoding="utf-8-sig", newline="\n")
+(OUT_DIR / "launcher_engine.ps1").write_text(engine, encoding="utf-8-sig", newline="\n")
 
 if sha(OUT_DIR / "launcher_gui.ps1") != EXPECTED_GUI_OUT:
     raise SystemExit("Clean GUI output hash mismatch")
