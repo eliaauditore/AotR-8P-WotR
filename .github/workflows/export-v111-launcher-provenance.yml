@@ -1,0 +1,42 @@
+name: Export v1.1.1 Launcher Provenance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: export-v111-launcher-provenance
+    runs-on: windows-latest
+    steps:
+      - name: Checkout current Guardian tools
+        uses: actions/checkout@v5
+
+      - name: Checkout frozen v1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: _donor_v111
+
+      - name: Export frozen launcher resources
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $donor = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '_donor_v111'))
+          $output = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '_provenance_v111'))
+          & '.\tools\guardian\EXPORT_V111_LAUNCHER_RESOURCES.ps1' `
+              -DonorRoot $donor `
+              -OutputRoot $output
+          if ($LASTEXITCODE -ne 0) {
+              throw "Provenance exporter failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload provenance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1.1.1-launcher-provenance
+          path: _provenance_v111/**
+          if-no-files-found: error
+          retention-days: 30
