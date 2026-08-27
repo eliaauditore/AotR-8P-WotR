@@ -81,12 +81,12 @@ $newClone = "Invoke-Git '' @('-c','core.autocrlf=false','-c','core.safecrlf=fals
 $text = Replace-ExactOnce $text $oldClone $newClone 'apply EOL config before clone checkout'
 
 # Prove all intended source transformations landed and old identities are gone.
-if (Get-ExactCount $text $newDefaultBuilder -ne 1) { throw 'Runtime stager lost canonical builder path.' }
-if (Get-ExactCount $text $newBuilderShaLine -ne 1) { throw 'Runtime stager lost canonical builder SHA.' }
-if (Get-ExactCount $text $newClone -ne 1) { throw 'Runtime stager lost pre-checkout EOL clone configuration.' }
-if (Get-ExactCount $text $oldDefaultBuilder -ne 0) { throw 'Runtime stager still contains obsolete builder path.' }
-if (Get-ExactCount $text $oldBuilderShaLine -ne 0) { throw 'Runtime stager still contains obsolete builder SHA.' }
-if (Get-ExactCount $text $badMarkerCheck -ne 0) { throw 'Runtime stager still contains invalid plaintext marker check.' }
+if ((Get-ExactCount $text $newDefaultBuilder) -ne 1) { throw 'Runtime stager lost canonical builder path.' }
+if ((Get-ExactCount $text $newBuilderShaLine) -ne 1) { throw 'Runtime stager lost canonical builder SHA.' }
+if ((Get-ExactCount $text $newClone) -ne 1) { throw 'Runtime stager lost pre-checkout EOL clone configuration.' }
+if ((Get-ExactCount $text $oldDefaultBuilder) -ne 0) { throw 'Runtime stager still contains obsolete builder path.' }
+if ((Get-ExactCount $text $oldBuilderShaLine) -ne 0) { throw 'Runtime stager still contains obsolete builder SHA.' }
+if ((Get-ExactCount $text $badMarkerCheck) -ne 0) { throw 'Runtime stager still contains invalid plaintext marker check.' }
 if ($text -notmatch [regex]::Escape($ExpectedRuntimeTestedExeSha)) { throw 'Runtime stager lost frozen runtime-tested EXE SHA pin.' }
 if ($text -notmatch [regex]::Escape($ExpectedCanonicalBuilderSha)) { throw 'Runtime stager lost canonical builder SHA pin.' }
 
