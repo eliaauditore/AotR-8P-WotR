@@ -1,0 +1,118 @@
+name: Verify Exact Launcher 1.1.2 Process Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/verify-exact-1.1.2-process-once.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    name: verify-exact-1.1.2-process-stability
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download exact successful 1.1.2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-Clean-Candidate-FileLockFixed
+          path: exact-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33088409970
+
+      - name: Verify exact identities and extract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip='exact-artifact\AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip'
+          $zipHash=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($zipHash -ne '55F391A79EE39E132EECC34435446813419B688B3ACAD22A6FBCBF908A793589'){throw "ZIP hash mismatch: $zipHash"}
+          New-Item -ItemType Directory -Force -Path exact-package | Out-Null
+          Expand-Archive -LiteralPath $zip -DestinationPath exact-package -Force
+          $expected=@('AotR 8P WotR Mod.exe','manifest.json','repair-manifest.json','payload_ui.big','payload_paper.inc')|Sort-Object
+          $actual=@(Get-ChildItem exact-package -File|Select-Object -ExpandProperty Name|Sort-Object)
+          if(($expected -join '|') -ne ($actual -join '|')){throw "Package contract mismatch: $($actual -join ', ')"}
+          $exeHash=(Get-FileHash -LiteralPath 'exact-package\AotR 8P WotR Mod.exe' -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($exeHash -ne 'ABB63269B48CB4FA52BBED7897FF07A6FCE5200E3EFF7CEBCAB28A84C8168818'){throw "EXE hash mismatch: $exeHash"}
+          Write-Host "EXACT_ZIP_SHA256=$zipHash"
+          Write-Host "EXACT_EXE_SHA256=$exeHash"
+
+      - name: Process-stability bootstrap gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path exact-package).Path
+          $exe=Join-Path $root 'AotR 8P WotR Mod.exe'
+          if(Test-Path (Join-Path $root 'internal')){throw 'internal directory exists before launch'}
+          $names=@('AotR 8P WotR Mod.exe','manifest.json','repair-manifest.json','payload_ui.big','payload_paper.inc')
+          $before=@{}
+          foreach($name in $names){$before[$name]=(Get-FileHash -LiteralPath (Join-Path $root $name) -Algorithm SHA256).Hash.ToUpperInvariant()}
+          $p=Start-Process -FilePath $exe -WorkingDirectory $root -PassThru
+          try {
+            for($i=0;$i -lt 15;$i++){
+              Start-Sleep -Seconds 1
+              $proc=Get-Process -Id $p.Id -ErrorAction SilentlyContinue
+              if(-not $proc){throw "Launcher process exited before 15-second stability gate at second $($i+1)"}
+              $proc.Dispose()
+            }
+            if(Test-Path (Join-Path $root 'internal')){throw 'Launcher materialized internal directory during bootstrap'}
+            Write-Host 'PROCESS_STABILITY_15S=PASS'
+            Write-Host 'NO_RUNTIME_INTERNAL_MATERIALIZATION=PASS'
+          }
+          finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+          Start-Sleep -Milliseconds 500
+          foreach($name in $names){
+            $after=(Get-FileHash -LiteralPath (Join-Path $root $name) -Algorithm SHA256).Hash.ToUpperInvariant()
+            if($after -ne $before[$name]){throw "Release artifact changed during bootstrap: $name"}
+          }
+          Write-Host 'FIVE_FILE_IMMUTABILITY=PASS'
+
+      - name: Defender exact ZIP and EXE gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $mp=@(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          )|ForEach-Object{Get-Item $_ -ErrorAction SilentlyContinue}|Sort-Object LastWriteTime -Descending|Select-Object -First 1
+          if(-not $mp){throw 'Windows Defender MpCmdRun unavailable'}
+          foreach($target in @(
+            (Resolve-Path 'exact-artifact\AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip').Path,
+            (Resolve-Path 'exact-package\AotR 8P WotR Mod.exe').Path
+          )){
+            & $mp.FullName -Scan -ScanType 3 -File $target -DisableRemediation
+            if($LASTEXITCODE -ne 0){throw "Defender did not return clean for $target (exit=$LASTEXITCODE)"}
+            Write-Host "DEFENDER_CLEAN=$target"
+          }
+
+      - name: Write verification report
+        shell: powershell
+        run: |
+          @'
+          Launcher 1.1.2 exact hosted verification
+          ZIP SHA256: 55F391A79EE39E132EECC34435446813419B688B3ACAD22A6FBCBF908A793589
+          EXE SHA256: ABB63269B48CB4FA52BBED7897FF07A6FCE5200E3EFF7CEBCAB28A84C8168818
+          Flat five-file contract: PASS
+          15-second launcher process stability: PASS
+          Runtime internal materialization: NONE
+          Five public files immutable: PASS
+          Defender exact ZIP: PASS
+          Defender exact EXE: PASS
+          Scope boundary: hosted runner has no canonical AotR install, so START -> lotrbfme2ep1.exe is not claimed here.
+          '@ | Set-Content -LiteralPath EXACT_1_1_2_PROCESS_VERIFICATION.txt -Encoding ASCII
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-Exact-Process-Verification
+          path: EXACT_1_1_2_PROCESS_VERIFICATION.txt
+          if-no-files-found: error
+          retention-days: 7
