@@ -1,0 +1,114 @@
+name: Materialize V19 Successor Resources Once
+
+on:
+  push:
+    branches:
+      - feature/v19-donor-free-successor
+    paths:
+      - ".github/workflows/materialize-v19-successor-resources-once.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  materialize:
+    name: materialize-v19-successor-resources
+    runs-on: windows-latest
+    steps:
+      - name: Checkout successor branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/v19-donor-free-successor
+          fetch-depth: 0
+
+      - name: Download frozen verified provenance artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v1.1.1-launcher-provenance
+          path: _artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33123908148
+
+      - name: Verify and materialize exact V19 clean resources
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $source = Join-Path $env:GITHUB_WORKSPACE '_artifact\_v19_clean_provenance'
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'launcher-source\v19-successor\resources'
+          if (-not (Test-Path -LiteralPath $source -PathType Container)) {
+              throw "Expected provenance source directory missing: $source"
+          }
+
+          $expected = [ordered]@{
+              'launcher_gui.ps1'     = '135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD'
+              'launcher_engine.ps1'  = '5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938'
+              'launcher_skin.png'    = 'BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6'
+              'launcher.ico'         = '3F5784964233DC701B2E9ABA1DD2EF3DDCC47FB5955D0B986FF5D3046DFE1F1A'
+              'final_stable_v7.ps1' = '72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2'
+              'v7_shellcode.bin'     = '60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A'
+              'row1cleanpatch.png'   = 'D4DC9A47F0E2FD9715D92F8DD4C3831B9AB95F8CA34E98937F019B7574294177'
+              'row2cleanpatch.png'   = '58B9A7173CE1C9C30C85EE76D15D54E3D40B3E7E14E25D0C1FE5D8EFD89E6D8E'
+              'row3cleanpatch.png'   = '7F86C02BC02D2E57D66202AF9C526D6FAE13CFC9B7CB1EFF1BB61C165B25278C'
+              'readycleanpatch.png'  = '35DCBCBE6E625C5C06EC36BAB3CA51A6F4EE29DA3DFF4CAEEDD69BC87D873DF3'
+          }
+
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $records = @()
+          foreach ($name in $expected.Keys) {
+              $src = Join-Path $source $name
+              if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "Provenance resource missing: $name" }
+              $srcHash = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToUpperInvariant()
+              if ($srcHash -ne $expected[$name]) {
+                  throw "$name source hash mismatch. Expected $($expected[$name]), got $srcHash"
+              }
+              $dst = Join-Path $dest $name
+              Copy-Item -LiteralPath $src -Destination $dst -Force
+              $dstHash = (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash.ToUpperInvariant()
+              if ($dstHash -ne $expected[$name]) { throw "$name destination hash mismatch after copy" }
+              $records += [ordered]@{
+                  name = $name
+                  size = [int64](Get-Item -LiteralPath $dst).Length
+                  sha256 = $dstHash
+              }
+              Write-Host "MATERIALIZED OK: $name $dstHash" -ForegroundColor Green
+          }
+
+          $actual = @(Get-ChildItem -LiteralPath $dest -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $wanted = @($expected.Keys | Sort-Object)
+          if (($actual -join '|') -ne ($wanted -join '|')) {
+              throw "Successor resource directory contains unexpected files: $($actual -join ', ')"
+          }
+
+          $manifest = [ordered]@{
+              schema = 1
+              state = 'MAINTAINED_REPOSITORY_RESOURCES'
+              provenance_workflow_run = 33123908148
+              provenance_artifact_id = 9667562167
+              provenance_artifact_digest = 'sha256:c19970b6c90ed41911d4e334b0c5660f5ee6477fae8cee417ad419f37ae71ba9'
+              provenance_transform_ref = '166184ec063ded18ff619d3e6a426179d4d886e7'
+              source_ref = 'v1.1.1 provenance export only; future builds consume repository files directly'
+              license_warning = 'Materialization is not an ownership or OSS license grant. See ../RESOURCE_OWNERSHIP.json.'
+              records = $records
+          }
+          $manifestPath = Join-Path $dest 'RESOURCE_HASHES.json'
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+      - name: Commit maintained resources to successor branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19-successor/resources
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo "No resource changes to commit."
+            exit 0
+          fi
+          git commit -m "V19 successor: materialize verified donor-free resources"
+          git push origin HEAD:feature/v19-donor-free-successor
