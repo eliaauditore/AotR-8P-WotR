@@ -1,3 +1,4 @@
+# one-shot RC3 trigger
 name: Fix Issue 40 V7 Hash and Build RC3 Once
 
 on:
