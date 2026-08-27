@@ -1,0 +1,141 @@
+name: Verify Exact Launcher 1.1.2 Artifact Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/verify-exact-1.1.2-artifact-once.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    name: verify-exact-1.1.2-artifact
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download exact successful 1.1.2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-Clean-Candidate-FileLockFixed
+          path: exact-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33088409970
+
+      - name: Verify exact artifact hashes and flat five-file contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip='exact-artifact\AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip'
+          if(-not(Test-Path -LiteralPath $zip)){throw 'Exact candidate ZIP missing'}
+          $zipHash=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($zipHash -ne '55F391A79EE39E132EECC34435446813419B688B3ACAD22A6FBCBF908A793589'){throw "ZIP hash mismatch: $zipHash"}
+          New-Item -ItemType Directory -Force -Path exact-package | Out-Null
+          Expand-Archive -LiteralPath $zip -DestinationPath exact-package -Force
+          $expected=@('AotR 8P WotR Mod.exe','manifest.json','repair-manifest.json','payload_ui.big','payload_paper.inc')|Sort-Object
+          $actual=@(Get-ChildItem exact-package -File|Select-Object -ExpandProperty Name|Sort-Object)
+          if(($expected -join '|') -ne ($actual -join '|')){throw "Package contract mismatch: $($actual -join ', ')"}
+          $exeHash=(Get-FileHash -LiteralPath 'exact-package\AotR 8P WotR Mod.exe' -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($exeHash -ne 'ABB63269B48CB4FA52BBED7897FF07A6FCE5200E3EFF7CEBCAB28A84C8168818'){throw "EXE hash mismatch: $exeHash"}
+          Write-Host "EXACT_ZIP_SHA256=$zipHash"
+          Write-Host "EXACT_EXE_SHA256=$exeHash"
+
+      - name: Defender scan exact ZIP and exact EXE
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $mp=@(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          )|ForEach-Object{Get-Item $_ -ErrorAction SilentlyContinue}|Sort-Object LastWriteTime -Descending|Select-Object -First 1
+          if(-not $mp){throw 'Windows Defender MpCmdRun unavailable'}
+          foreach($target in @(
+            (Resolve-Path 'exact-artifact\AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip').Path,
+            (Resolve-Path 'exact-package\AotR 8P WotR Mod.exe').Path
+          )){
+            & $mp.FullName -Scan -ScanType 3 -File $target -DisableRemediation
+            if($LASTEXITCODE -ne 0){throw "Defender did not return clean for $target (exit=$LASTEXITCODE)"}
+            Write-Host "DEFENDER_CLEAN=$target"
+          }
+
+      - name: Bootstrap-smoke exact EXE without materialized internal assets
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          $root=(Resolve-Path exact-package).Path
+          if(Test-Path (Join-Path $root 'internal')){throw 'internal directory exists before launch'}
+          $exe=Join-Path $root 'AotR 8P WotR Mod.exe'
+          $before=@{
+            exe=(Get-FileHash $exe -Algorithm SHA256).Hash
+            manifest=(Get-FileHash (Join-Path $root 'manifest.json') -Algorithm SHA256).Hash
+            repair=(Get-FileHash (Join-Path $root 'repair-manifest.json') -Algorithm SHA256).Hash
+            ui=(Get-FileHash (Join-Path $root 'payload_ui.big') -Algorithm SHA256).Hash
+            paper=(Get-FileHash (Join-Path $root 'payload_paper.inc') -Algorithm SHA256).Hash
+          }
+          $p=Start-Process -FilePath $exe -WorkingDirectory $root -PassThru
+          try {
+            $deadline=(Get-Date).AddSeconds(20)
+            $windowSeen=$false
+            $errorSeen=$false
+            while((Get-Date) -lt $deadline){
+              Start-Sleep -Milliseconds 500
+              if($p.HasExited){throw "Launcher exited early with code $($p.ExitCode)"}
+              $wins=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+              foreach($w in $wins){
+                if($w.Current.ProcessId -ne $p.Id){continue}
+                $windowSeen=$true
+                $desc=$w.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+                foreach($e in $desc){
+                  $name=[string]$e.Current.Name
+                  if($name -like '*Could not start the embedded launcher*'){$errorSeen=$true}
+                }
+              }
+              if($windowSeen -and -not $errorSeen -and ((Get-Date) -gt $deadline.AddSeconds(-10))){break}
+            }
+            if(-not $windowSeen){throw 'No launcher window became visible'}
+            if($errorSeen){throw 'Bootstrap error dialog detected'}
+            if(Test-Path (Join-Path $root 'internal')){throw 'Launcher unexpectedly materialized internal assets'}
+            Write-Host 'BOOTSTRAP_SMOKE=PASS'
+          }
+          finally {
+            if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+          }
+          $after=@{
+            exe=(Get-FileHash $exe -Algorithm SHA256).Hash
+            manifest=(Get-FileHash (Join-Path $root 'manifest.json') -Algorithm SHA256).Hash
+            repair=(Get-FileHash (Join-Path $root 'repair-manifest.json') -Algorithm SHA256).Hash
+            ui=(Get-FileHash (Join-Path $root 'payload_ui.big') -Algorithm SHA256).Hash
+            paper=(Get-FileHash (Join-Path $root 'payload_paper.inc') -Algorithm SHA256).Hash
+          }
+          foreach($k in $before.Keys){if($before[$k] -ne $after[$k]){throw "Release artifact changed during bootstrap: $k"}}
+          Write-Host 'ARTIFACT_IMMUTABILITY=PASS'
+
+      - name: Write exact verification report
+        shell: powershell
+        run: |
+          @'
+          Launcher 1.1.2 exact artifact verification
+          ZIP SHA256: 55F391A79EE39E132EECC34435446813419B688B3ACAD22A6FBCBF908A793589
+          EXE SHA256: ABB63269B48CB4FA52BBED7897FF07A6FCE5200E3EFF7CEBCAB28A84C8168818
+          Flat five-file contract: PASS
+          Defender exact ZIP: PASS
+          Defender exact EXE: PASS
+          Bootstrap smoke: PASS
+          Runtime materialized internal assets: NONE
+          Public artifact immutability: PASS
+          Full START -> AotR runtime requires canonical AotR installation and is not claimed by this hosted-runner gate.
+          '@ | Set-Content -LiteralPath EXACT_1_1_2_VERIFICATION.txt -Encoding ASCII
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-Exact-Verification
+          path: EXACT_1_1_2_VERIFICATION.txt
+          if-no-files-found: error
+          retention-days: 7
