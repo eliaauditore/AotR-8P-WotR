@@ -1,0 +1,64 @@
+name: Diagnose Launcher 1.1.2 Transform
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/diagnose-launcher-1.1.2-transform.yml"
+      - "launcher-source/v19/prepare_clean_resources.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor
+
+      - name: Extract frozen GUI and engine
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.IO.Compression
+          New-Item -ItemType Directory -Force -Path work\frozen,work\resources | Out-Null
+          $exe=(Resolve-Path 'donor\AotR 8P WotR Mod.exe').Path
+          $asm=[Reflection.Assembly]::LoadFile($exe)
+          $type=$asm.GetType('Program',$true)
+          $flags=[Reflection.BindingFlags]'NonPublic,Public,Static'
+          function Const([string]$name){$f=$type.GetField($name,$flags);if(-not $f){throw "Missing $name"};[string]$f.GetRawConstantValue()}
+          function Inflate([string]$b64,[string]$path){$raw=[Convert]::FromBase64String($b64);$i=New-Object IO.MemoryStream(,$raw);try{$g=New-Object IO.Compression.GZipStream($i,[IO.Compression.CompressionMode]::Decompress);try{$o=[IO.File]::Create($path);try{$g.CopyTo($o)}finally{$o.Dispose()}}finally{$g.Dispose()}}finally{$i.Dispose()}}
+          Inflate (Const 'GuiGzipBase64') 'work\frozen\launcher_gui.ps1'
+          Inflate (Const 'EngineGzipBase64') 'work\frozen\launcher_engine.ps1'
+
+      - name: Transform
+        shell: python
+        run: |
+          import subprocess,sys
+          subprocess.check_call([sys.executable,'launcher-source/v19/prepare_clean_resources.py','work/frozen/launcher_gui.ps1','work/frozen/launcher_engine.ps1','work/resources'])
+
+      - name: Report exact parser errors
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $failed=$false
+          foreach($path in @('work\frozen\launcher_gui.ps1','work\resources\launcher_gui.ps1','work\resources\launcher_engine.ps1')){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            Write-Host "=== $path : $($errors.Count) parser error(s) ==="
+            foreach($e in @($errors | Select-Object -First 12)){
+              $line=$e.Extent.StartLineNumber;$col=$e.Extent.StartColumnNumber
+              Write-Host ("LINE={0} COL={1} ID={2} TEXT=<{3}> MSG={4}" -f $line,$col,$e.ErrorId,$e.Extent.Text,$e.Message)
+              $all=Get-Content -LiteralPath $path
+              $from=[Math]::Max(1,$line-2);$to=[Math]::Min($all.Count,$line+2)
+              for($n=$from;$n -le $to;$n++){Write-Host ("  {0}: {1}" -f $n,$all[$n-1])}
+            }
+            if($path -like '*resources*' -and $errors.Count -gt 0){$failed=$true}
+          }
+          if($failed){throw 'Transformed script parser diagnostics recorded above.'}
