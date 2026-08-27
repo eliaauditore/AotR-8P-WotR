@@ -1,0 +1,62 @@
+name: Inspect Launcher 1.1.2 Template
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/inspect-launcher-template-1.1.2.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Decode canonical 1.1.1 C# template
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64, re
+
+          path = Path("launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1_1.ps1")
+          text = path.read_text(encoding="utf-8-sig")
+          m = re.search(r"\$template\s*=\s*\[Text\.Encoding\]::UTF8\.GetString\(\[Convert\]::FromBase64String\(@'\r?\n(.*?)\r?\n'@\)\)", text, re.S)
+          if not m:
+              raise SystemExit("Embedded template Base64 block not found")
+          src = base64.b64decode(m.group(1).encode("ascii")).decode("utf-8")
+          Path("decoded-launcher-1.1.1.cs").write_text(src, encoding="utf-8")
+          print(f"Decoded C# lines: {len(src.splitlines())}")
+          print(f"Decoded C# bytes: {len(src.encode('utf-8'))}")
+
+          tokens = [
+              "Issue33",
+              "FromBase64String",
+              "GZipStream",
+              "WriteAllBytes",
+              "WebClient",
+              "DownloadString",
+              "DownloadFile",
+              "ProcessStartInfo",
+              "PowerShell",
+              "Runspace",
+          ]
+          lines = src.splitlines()
+          for token in tokens:
+              hits = [i for i, line in enumerate(lines) if token.lower() in line.lower()]
+              print(f"\n=== {token}: {len(hits)} hit(s) ===")
+              for i in hits[:20]:
+                  lo, hi = max(0, i-3), min(len(lines), i+4)
+                  print(f"--- lines {lo+1}-{hi} ---")
+                  for j in range(lo, hi):
+                      print(f"{j+1:05d}: {lines[j]}")
+
+      - name: Upload decoded source for audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoded-launcher-1.1.1-template
+          path: decoded-launcher-1.1.1.cs
+          retention-days: 1
