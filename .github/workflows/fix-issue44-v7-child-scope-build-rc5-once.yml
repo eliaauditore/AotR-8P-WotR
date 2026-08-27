@@ -1,0 +1,256 @@
+name: Fix Issue 44 V7 Child PowerShell Scope and Build RC5 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - .github/workflows/fix-issue44-v7-child-scope-build-rc5-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-issue44-build-rc5:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Patch child PowerShell shellcode transport with placeholder hashes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # 1) The transformed FINAL_STABLE_V7 script must receive the shellcode explicitly
+          # as a declared parameter. A [PowerShell]::Create() child does not inherit the
+          # Engine runspace's global variables.
+          p = Path('launcher-source/v19/prepare_final_stable_resource.py')
+          text = p.read_text(encoding='utf-8-sig')
+          old = 'EXPECTED_OUTPUT = "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED"'
+          if text.count(old) != 1:
+              raise SystemExit('Current FINAL_STABLE expected hash anchor missing')
+          text = text.replace(old, 'EXPECTED_OUTPUT = "' + ('0' * 64) + '"', 1)
+
+          old = '''replacement = \'\'\'[byte[]]$ShellcodeTemplate = [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES
+          if ($null -eq $ShellcodeTemplate -or $ShellcodeTemplate.Length -eq 0) {
+              throw "Interner V7-Shellcode-Resource fehlt."
+          }
+          \'\'\'
+          text = re.sub(pattern, replacement, text, count=1)
+          '''
+          new = '''# Make the child PowerShell transport explicit instead of relying on inherited global scope.
+          param_anchor = "    [single]$DragSpeed = -16.0\\n)"
+          param_replacement = "    [single]$DragSpeed = -16.0,\\n    [Parameter(Mandatory=$true)]\\n    [byte[]]$V7Shellcode\\n)"
+          if text.count(param_anchor) != 1:
+              raise SystemExit("V7 parameter block anchor is not unique")
+          text = text.replace(param_anchor, param_replacement, 1)
+
+          replacement = \'\'\'[byte[]]$ShellcodeTemplate = [byte[]]$V7Shellcode
+          if ($null -eq $ShellcodeTemplate -or $ShellcodeTemplate.Length -eq 0) {
+              throw "Interner V7-Shellcode-Resource fehlt."
+          }
+          \'\'\'
+          text = re.sub(pattern, replacement, text, count=1)
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('Current V7 resource replacement block anchor missing')
+          text = text.replace(old, new, 1)
+          text = text.replace('if "AOTR8P_V7_SHELLCODE_BYTES" not in text:\n    raise SystemExit("Managed V7 shellcode resource handoff missing")', 'if "$V7Shellcode" not in text:\n    raise SystemExit("Explicit V7 shellcode parameter missing")\nif "AOTR8P_V7_SHELLCODE_BYTES" in text:\n    raise SystemExit("V7 child script still depends on parent global scope")')
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          # 2) The Engine must pass that parameter into the [PowerShell]::Create() child.
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          old = 'EXPECTED_ENGINE_OUT = "95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12"'
+          if text.count(old) != 1:
+              raise SystemExit('Current clean Engine expected hash anchor missing')
+          text = text.replace(old, 'EXPECTED_ENGINE_OUT = "' + ('0' * 64) + '"', 1)
+          anchor = '''engine = replace_once(engine, '''    $bytes = [Convert]::FromBase64String(($FinalStableV7Base64 -replace '\\\\s',''))
+              $embeddedHash = [BitConverter]::ToString(
+                  [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+              ).Replace("-","")
+
+              if ($embeddedHash -ne $FinalStableV7Sha256) {
+                  throw "Eingebettetes FINAL_STABLE_V7 ist beschaedigt."
+              }
+
+          ''', '''    $bytes = [byte[]]$global:AOTR8P_FINAL_STABLE_V7_BYTES
+              if ($null -eq $bytes -or $bytes.Length -eq 0) {
+                  throw "FINAL_STABLE_V7 resource is missing."
+              }
+              $embeddedHash = [BitConverter]::ToString(
+                  [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+              ).Replace("-","")
+              if ($embeddedHash -ne $FinalStableV7Sha256) {
+                  throw "FINAL_STABLE_V7 resource hash mismatch."
+              }
+
+          ''', "FINAL_STABLE_V7 resource consumption")
+          '''
+          if text.count(anchor) != 1:
+              raise SystemExit('Engine FINAL_STABLE transform anchor missing')
+          insertion = anchor + '''
+          engine = replace_once(engine, '        [void]$v7.AddParameter("DragSpeed", [single]-16.0)\\n', '''        [void]$v7.AddParameter("DragSpeed", [single]-16.0)
+                  [void]$v7.AddParameter("V7Shellcode", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)
+          ''', "V7 child shellcode parameter")
+          '''
+          text = text.replace(anchor, insertion, 1)
+          text = text.replace('required_engine = ("AOTR8P_FINAL_STABLE_V7_BYTES",)', 'required_engine = ("AOTR8P_FINAL_STABLE_V7_BYTES", "AOTR8P_V7_SHELLCODE_BYTES", "V7Shellcode")')
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          # 3) Builder gates are placeholders for deterministic derivation below.
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          old_engine = 'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12" "Clean engine"'
+          old_final = 'Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED" "Clean FINAL_STABLE_V7"'
+          if bt.count(old_engine) != 1 or bt.count(old_final) != 1:
+              raise SystemExit('Current builder hash gates missing')
+          bt = bt.replace(old_engine, 'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "' + ('0' * 64) + '" "Clean engine"', 1)
+          bt = bt.replace(old_final, 'Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "' + ('0' * 64) + '" "Clean FINAL_STABLE_V7"', 1)
+          b.write_text(bt, encoding='utf-8', newline='\n')
+
+      - name: Derive clean Engine hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+              -FrozenDonorRoot .\donor-v1.1.1 `
+              -OutputRoot .\_ISSUE44_ENGINE_DERIVE `
+              -LauncherVersion 1.1.2
+            throw 'Engine derivation unexpectedly completed.'
+          } catch { Write-Host "Expected Engine derivation stop: $($_.Exception.Message)" }
+          $engine='.\_ISSUE44_ENGINE_DERIVE\work\resources\launcher_engine.ps1'
+          if(-not(Test-Path -LiteralPath $engine)){throw 'Derived Engine resource missing'}
+          $h=(Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash.ToUpperInvariant()
+          $txt=Get-Content -LiteralPath $engine -Raw -Encoding UTF8
+          if($txt -notmatch 'AddParameter\("V7Shellcode", \[byte\[\]\]\$global:AOTR8P_V7_SHELLCODE_BYTES\)'){throw 'Explicit V7 child parameter missing in Engine'}
+          "ENGINE_HASH=$h" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "ISSUE44_ENGINE_SHA256=$h"
+          $global:LASTEXITCODE=0
+          exit 0
+
+      - name: Pin Engine hash and derive FINAL_STABLE_V7 hash
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h=os.environ['ENGINE_HASH'].strip().upper()
+          if len(h)!=64: raise SystemExit('Invalid ENGINE_HASH')
+          p=Path('launcher-source/v19/prepare_clean_resources.py')
+          t=p.read_text(encoding='utf-8-sig')
+          z='EXPECTED_ENGINE_OUT = "' + ('0'*64) + '"'
+          if t.count(z)!=1: raise SystemExit('Engine transformer placeholder missing')
+          t=t.replace(z,f'EXPECTED_ENGINE_OUT = "{h}"',1)
+          p.write_text(t,encoding='utf-8',newline='\n')
+          b=Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          t=b.read_text(encoding='utf-8-sig')
+          z='Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "' + ('0'*64) + '" "Clean engine"'
+          if t.count(z)!=1: raise SystemExit('Builder Engine placeholder missing')
+          t=t.replace(z,f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{h}" "Clean engine"',1)
+          b.write_text(t,encoding='utf-8',newline='\n')
+
+      - name: Derive FINAL_STABLE_V7 hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+              -FrozenDonorRoot .\donor-v1.1.1 `
+              -OutputRoot .\_ISSUE44_FINAL_DERIVE `
+              -LauncherVersion 1.1.2
+            throw 'FINAL_STABLE derivation unexpectedly completed.'
+          } catch { Write-Host "Expected FINAL_STABLE derivation stop: $($_.Exception.Message)" }
+          $final='.\_ISSUE44_FINAL_DERIVE\work\resources\final_stable_v7.ps1'
+          if(-not(Test-Path -LiteralPath $final)){throw 'Derived FINAL_STABLE resource missing'}
+          $h=(Get-FileHash -LiteralPath $final -Algorithm SHA256).Hash.ToUpperInvariant()
+          $txt=Get-Content -LiteralPath $final -Raw -Encoding UTF8
+          if($txt -notmatch '\[byte\[\]\]\$V7Shellcode'){throw 'V7Shellcode parameter not present in child script'}
+          if($txt -match 'AOTR8P_V7_SHELLCODE_BYTES'){throw 'Child script still relies on parent global variable'}
+          "FINAL_HASH=$h" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "ISSUE44_FINAL_STABLE_SHA256=$h"
+          $global:LASTEXITCODE=0
+          exit 0
+
+      - name: Pin FINAL_STABLE_V7 hash
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h=os.environ['FINAL_HASH'].strip().upper()
+          if len(h)!=64: raise SystemExit('Invalid FINAL_HASH')
+          p=Path('launcher-source/v19/prepare_final_stable_resource.py')
+          t=p.read_text(encoding='utf-8-sig')
+          z='EXPECTED_OUTPUT = "' + ('0'*64) + '"'
+          if t.count(z)!=1: raise SystemExit('FINAL transformer placeholder missing')
+          t=t.replace(z,f'EXPECTED_OUTPUT = "{h}"',1)
+          p.write_text(t,encoding='utf-8',newline='\n')
+          b=Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          t=b.read_text(encoding='utf-8-sig')
+          z='Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "' + ('0'*64) + '" "Clean FINAL_STABLE_V7"'
+          if t.count(z)!=1: raise SystemExit('Builder FINAL placeholder missing')
+          t=t.replace(z,f'Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "{h}" "Clean FINAL_STABLE_V7"',1)
+          b.write_text(t,encoding='utf-8',newline='\n')
+
+      - name: Commit issue 44 source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/prepare_final_stable_resource.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: pass shellcode explicitly to V7 child PowerShell"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build RC5 and run child-scope regression gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_V19_1_1_2_RC5 `
+            -LauncherVersion 1.1.2
+
+          $final='.\_V19_1_1_2_RC5\work\resources\final_stable_v7.ps1'
+          $shell='.\_V19_1_1_2_RC5\work\resources\v7_shellcode.bin'
+          $text=Get-Content -LiteralPath $final -Raw -Encoding UTF8
+          $bytes=[IO.File]::ReadAllBytes($shell)
+          $v7=[powershell]::Create()
+          try {
+            [void]$v7.AddScript($text)
+            [void]$v7.AddParameter('GameDat','Z:\__AOTR_RC5_NONEXISTENT__\game.dat')
+            [void]$v7.AddParameter('AnchorGain',[single]2.0)
+            [void]$v7.AddParameter('DragSpeed',[single]-16.0)
+            [void]$v7.AddParameter('V7Shellcode',[byte[]]$bytes)
+            $null=$v7.Invoke()
+            $detail=($v7.Streams.Error | ForEach-Object {$_.ToString()}) -join ' | '
+            if($detail -match 'Shellcode-Resource fehlt|Shellcode-Laengenfehler'){throw "Child scope gate failed: $detail"}
+            if($detail -notmatch 'game\.dat|nicht gefunden|not found'){throw "Child scope gate did not advance to GameDat validation: $detail"}
+            Write-Host "ISSUE44_CHILD_POWERSHELL_SCOPE_GATE=PASS :: $detail"
+          } finally { $v7.Dispose() }
+
+      - name: Upload RC5 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC5-Issue44-Fixed
+          path: |
+            _V19_1_1_2_RC5/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _V19_1_1_2_RC5/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _V19_1_1_2_RC5/SHA256SUMS.json
+            _V19_1_1_2_RC5/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
