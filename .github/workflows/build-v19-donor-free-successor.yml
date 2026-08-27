@@ -5,6 +5,7 @@ on:
     branches:
       - feature/v19-donor-free-successor
     paths:
+      - ".gitattributes"
       - "launcher-source/v19-successor/**"
       - "launcher-source/v19/launcher.cs"
       - "launcher-source/v19/VERIFY_V7_RESOURCE_CHAIN.ps1"
