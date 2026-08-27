@@ -193,9 +193,9 @@ else {
     $lines.Add("")
     $lines.Add("### SignTool output")
     $lines.Add("")
-    $lines.Add("```text")
+    $lines.Add('```text')
     foreach ($line in $output) { $lines.Add([string]$line) }
-    $lines.Add("```")
+    $lines.Add('```')
     if (-not $signToolPass) { $overallPass = $false }
 }
 
