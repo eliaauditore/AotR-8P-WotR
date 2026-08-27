@@ -1,0 +1,135 @@
+name: Fix Issue 42 V7 Shellcode Handoff and Build RC4 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - .github/workflows/fix-issue42-v7-shellcode-handoff-build-rc4-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-issue42-build-rc4:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Add V7 shellcode GUI-to-engine runspace handoff with placeholder GUI hash
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          old = '''        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)\n        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_FINAL_STABLE_V7_BYTES", [byte[]]$global:AOTR8P_FINAL_STABLE_V7_BYTES)\n'''
+          new = '''        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)\n        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_FINAL_STABLE_V7_BYTES", [byte[]]$global:AOTR8P_FINAL_STABLE_V7_BYTES)\n        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_V7_SHELLCODE_BYTES", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'Issue42 handoff anchor count={text.count(old)}')
+          text = text.replace(old, new, 1)
+          old_hash = 'EXPECTED_GUI_OUT = "4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC"'
+          if text.count(old_hash) != 1:
+              raise SystemExit('Old clean GUI expected hash anchor missing')
+          text = text.replace(old_hash, 'EXPECTED_GUI_OUT = "' + ('0' * 64) + '"', 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Derive deterministic GUI hash after issue 42 fix
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+              -FrozenDonorRoot .\donor-v1.1.1 `
+              -OutputRoot .\_ISSUE42_HASH_DERIVE `
+              -LauncherVersion 1.1.2
+            throw 'Hash derivation unexpectedly succeeded with placeholder GUI hash.'
+          }
+          catch {
+            Write-Host "Expected issue42 hash derivation stop: $($_.Exception.Message)"
+          }
+          $gui='.\_ISSUE42_HASH_DERIVE\work\resources\launcher_gui.ps1'
+          $engine='.\_ISSUE42_HASH_DERIVE\work\resources\launcher_engine.ps1'
+          if(-not(Test-Path -LiteralPath $gui)){throw 'Derived GUI resource missing'}
+          if(-not(Test-Path -LiteralPath $engine)){throw 'Derived engine resource missing'}
+          $guiHash=(Get-FileHash -LiteralPath $gui -Algorithm SHA256).Hash.ToUpperInvariant()
+          $engineHash=(Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($engineHash -ne '95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12'){throw "Unexpected engine change: $engineHash"}
+          $guiText=Get-Content -LiteralPath $gui -Raw -Encoding UTF8
+          $handoff='SetVariable("AOTR8P_V7_SHELLCODE_BYTES", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)'
+          if($guiText.IndexOf($handoff,[StringComparison]::Ordinal) -lt 0){throw 'V7 shellcode engine-runspace handoff missing from transformed GUI'}
+          "GUI_HASH=$guiHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "ISSUE42_FIXED_GUI_SHA256=$guiHash"
+          $global:LASTEXITCODE=0
+          exit 0
+
+      - name: Pin deterministic GUI hash and build gate
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h = os.environ['GUI_HASH'].strip().upper()
+          if len(h) != 64:
+              raise SystemExit('Invalid derived GUI_HASH')
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          zero = 'EXPECTED_GUI_OUT = "' + ('0' * 64) + '"'
+          if text.count(zero) != 1:
+              raise SystemExit('Placeholder transformer GUI hash missing')
+          text = text.replace(zero, f'EXPECTED_GUI_OUT = "{h}"', 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          old = 'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC" "Clean GUI"'
+          if bt.count(old) != 1:
+              raise SystemExit('Old GUI build hash gate missing')
+          bt = bt.replace(old, f'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "{h}" "Clean GUI"', 1)
+          b.write_text(bt, encoding='utf-8', newline='\n')
+
+      - name: Commit issue 42 runtime fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: pass V7 shellcode into engine runspace"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build and Defender-scan 1.1.2 RC4
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_V19_1_1_2_RC4 `
+            -LauncherVersion 1.1.2
+          $gui='.\_V19_1_1_2_RC4\work\resources\launcher_gui.ps1'
+          $txt=Get-Content -LiteralPath $gui -Raw -Encoding UTF8
+          if($txt -notmatch 'SetVariable\("AOTR8P_V7_SHELLCODE_BYTES", \[byte\[\]\]\$global:AOTR8P_V7_SHELLCODE_BYTES\)'){throw 'Issue #42 shellcode handoff not active'}
+          Write-Host 'ISSUE42_V7_SHELLCODE_HANDOFF_REGRESSION_GATE=PASS'
+
+      - name: Upload RC4 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC4-Issue42-Fixed
+          path: |
+            _V19_1_1_2_RC4/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _V19_1_1_2_RC4/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _V19_1_1_2_RC4/SHA256SUMS.json
+            _V19_1_1_2_RC4/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
