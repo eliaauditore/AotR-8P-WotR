@@ -73,7 +73,7 @@ if ($engineExpectedFinalHash -ne $actualFinalHash) {
     throw "V7 cross-resource hash mismatch. Engine expects $engineExpectedFinalHash but final_stable_v7.ps1 is $actualFinalHash"
 }
 
-$engineChildHandoff = 'AddParameter("V7Shellcode", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)'
+$engineChildHandoff = 'AddParameter("V7Shellcode", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)'.Replace('\"','"')
 if ($engineText.IndexOf($engineChildHandoff,[StringComparison]::Ordinal) -lt 0) {
     throw "Engine -> child PowerShell V7Shellcode AddParameter handoff is missing."
 }
