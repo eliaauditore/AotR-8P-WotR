@@ -10,14 +10,19 @@ This document records the current cross-component integration baseline. It is no
 
 - Version: `1.1`
 - Release commit: `bbd7eff483d2cdbf3e799f764433b49195dc55b6`
+- Release tag: `v1.1`
+- GitHub Release: `Launcher 1.1`
 - Canonical 1.1 builder commit: `7072e19bd43a350da0344b1b5e32ab9d052b3404`
 - Launcher EXE SHA256: `9F2D79FC951082158D7E712E3DDDDE3A050A69CDA4A372CBF43039CB379942E4`
 - Authoritative repository builder: `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1.ps1`
-- Release Consistency workflow on the canonical 1.1 builder commit: `PASS`
+- Release Consistency: `PASS`
+- Versioned release/promotion evidence: `docs/release/LAUNCHER_1_1_RELEASE_CHECKPOINT.md`
 
 The automated integrity gate confirms that the versioned 1.1 EXE, manifests, payload hashes, FINAL builder presence and known repair-action set are internally consistent.
 
-Important distinction: repository/file integrity is proven, but the Project Guardian has not found a versioned checkpoint that explicitly ties the exact final 1.1 EXE hash above to the complete normal-launch/runtime regression matrix. Until such evidence is recorded, the exact-final-EXE runtime regression remains `REVIEW_REQUIRED` rather than being inferred from hash consistency alone.
+The release checkpoint now also records the already-completed robustness/promotion evidence: Stage 4 resolver matrix `29/29 PASS`, Stage 10 production `PASS`, and Stage 11 exact-final-EXE launcher/config promotion gate `PASS`.
+
+Evidence boundary: a separate recorded run showing the exact final 1.1 EXE hash completing the full `START -> AotR/game process -> 8P runtime/FINAL_STABLE_V7` in-game smoke path was not found. Do not infer that specific run from file-integrity or launcher-GUI evidence alone.
 
 ### Approved payload hashes
 
@@ -72,10 +77,11 @@ Local equivalents of the launcher builder, runtime patch inputs, `game.dat`, BIG
 ## SOURCES OF TRUTH
 
 1. `main` is the source of truth for currently versioned project/release files.
-2. The exact release commit and SHA256 checkpoints identify a release artifact independently of later documentation/research merges to `main`.
-3. Local reverse-engineering workspaces may contain newer research and experimental artifacts; they are additional evidence, not automatically production truth.
-4. Reproducible runtime tests override older assumptions when the test conditions and tested hash are documented.
-5. Historical working builds and failed experiments remain references unless explicitly classified otherwise.
+2. Tag `v1.1`, release commit `bbd7eff...`, and the exact release SHA256 identify launcher 1.1 independently of later documentation/research merges to `main`.
+3. `docs/release/LAUNCHER_1_1_RELEASE_CHECKPOINT.md` is the compact versioned launcher 1.1 promotion/evidence checkpoint.
+4. Local reverse-engineering workspaces may contain newer research and experimental artifacts; they are additional evidence, not automatically production truth.
+5. Reproducible runtime tests override older assumptions when the test conditions and tested hash are documented.
+6. Historical working builds and failed experiments remain references unless explicitly classified otherwise.
 
 ## CURRENT INTEGRATION GATES
 
@@ -91,8 +97,17 @@ A future launcher build must demonstrate at minimum:
 - support fingerprint/bundle behavior remains intact;
 - launcher `MESSAGES` behavior remains intact;
 - release EXE and payload hashes match the manifests;
-- the exact final EXE hash used for release is tied to the recorded runtime regression result;
+- the exact final EXE hash used for release is tied to the recorded regression result;
 - rollback to the 1.1 working reference remains possible, with 1.0.10 retained as a historical rollback reference.
+
+## CI / PROTECTION TARGET
+
+The two checks intended for required-status-check protection use distinct names:
+
+- `release-consistency`
+- `ticket-system`
+
+Once branch protection/rulesets are enabled for `main`, require pull requests and these checks for relevant changes. Repository administration is an account-level setting and is not controlled by project source files.
 
 ## CLEANUP CLASSIFICATION
 
@@ -108,18 +123,16 @@ Current policy:
 
 ## OPEN GUARDIAN RISKS
 
-### HIGH
+### HIGH — repository administration
 
-- `main` currently lacks branch protection/rulesets. Direct release-changing pushes can bypass PR review despite the consistency workflow running afterward.
+- `main` currently lacks branch protection/rulesets. Direct release-changing pushes can bypass PR review despite CI running afterward. This requires a GitHub repository administration setting; the connected project integration has read-only visibility for branch protection and cannot change that account-level setting itself.
 
-### MEDIUM
+### MEDIUM — exact-final in-game smoke evidence
 
-- Only tag `v1.0.9` currently exists; no `v1.0.10` or `v1.1` release tag is present.
-- No GitHub Release record currently exists for 1.1.
-- No versioned checkpoint was found that explicitly proves the complete runtime regression against exact final 1.1 EXE SHA256 `9F2D79FC951082158D7E712E3DDDDE3A050A69CDA4A372CBF43039CB379942E4`.
+- The launcher 1.1 release/promotion checkpoint now exists and records the exact final artifact plus the already-completed Stage 4/10/11 evidence. What remains unrecorded is specifically the exact final 1.1 hash completing a full `START -> AotR/game -> 8P runtime/FINAL_STABLE_V7` smoke path.
 
-### LOW
+### HISTORICAL NOTE — not a current release defect
 
-- The canonical 1.1 builder inherits a top source comment that still says `V18 FINAL 1.0.10`, while its actual `LauncherVersion` parameter is `1.1`. This is non-functional source-comment metadata. Do not mutate the canonical released builder solely to cosmetically correct the comment; record/fix it in the next deliberate builder revision instead.
+- The canonical 1.1 builder inherits a top source comment that says `V18 FINAL 1.0.10`, while its actual `LauncherVersion` parameter is correctly `1.1`. The released builder source is retained unchanged because mutating the canonical tested source solely for cosmetic text would weaken artifact provenance. Correct the inherited comment in the next deliberate builder revision.
 
-See Guardian issue `#25` for repository-protection and release-metadata follow-up.
+See Guardian issue `#25` for the two remaining non-source actions.
