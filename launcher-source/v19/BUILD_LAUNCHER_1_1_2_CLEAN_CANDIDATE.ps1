@@ -117,10 +117,12 @@ Assert-Hash $FrozenFinal "FEAF40B3B231646CD8F7C7099D1E8544090D5010F1C6DB06E5B2F3
 $Python = (Get-Command python -ErrorAction Stop).Source
 & $Python (Join-Path $PSScriptRoot "prepare_clean_resources.py") $FrozenGui $FrozenEngine $Resources
 if ($LASTEXITCODE -ne 0) { throw "GUI/engine clean resource transform failed" }
+& $Python (Join-Path $PSScriptRoot "apply_issue43_recheck_flow.py") (Join-Path $Resources "launcher_gui.ps1") --expected-output "135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD"
+if ($LASTEXITCODE -ne 0) { throw "Issue43 post-repair health re-check transform failed" }
 & $Python (Join-Path $PSScriptRoot "prepare_final_stable_resource.py") $FrozenFinal (Join-Path $Resources "final_stable_v7.ps1") (Join-Path $Resources "v7_shellcode.bin")
 if ($LASTEXITCODE -ne 0) { throw "FINAL_STABLE_V7 clean resource transform failed" }
 
-Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "201B90D474AE39EE7776159A79AC025C80C6E95BB263D1CBF53152B3784895EF" "Clean GUI"
+Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD" "Clean GUI Issue43"
 Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938" "Clean engine"
 Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2" "Clean FINAL_STABLE_V7"
 Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"
