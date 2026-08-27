@@ -33,10 +33,7 @@ function Expand-GzipBase64Bytes([string]$Base64) {
         $gzip = [IO.Compression.GZipStream]::new($input,[IO.Compression.CompressionMode]::Decompress)
         try {
             $output = [IO.MemoryStream]::new()
-            try {
-                $gzip.CopyTo($output)
-                return $output.ToArray()
-            }
+            try { $gzip.CopyTo($output); return $output.ToArray() }
             finally { $output.Dispose() }
         }
         finally { $gzip.Dispose() }
@@ -56,11 +53,7 @@ function Get-Payload([string]$CSharp,[string]$Name) {
     $m = [regex]::Match($CSharp,$pattern)
     if (-not $m.Success) { throw "Could not locate $Name in outer C# template." }
     $bytes = Expand-GzipBase64Bytes $m.Groups['data'].Value
-    return [PSCustomObject]@{
-        Bytes = $bytes
-        Text = [Text.Encoding]::UTF8.GetString($bytes)
-        Sha256 = Get-Sha256Bytes $bytes
-    }
+    [PSCustomObject]@{ Bytes=$bytes; Text=[Text.Encoding]::UTF8.GetString($bytes); Sha256=(Get-Sha256Bytes $bytes) }
 }
 
 function Count-Matches([string]$Text,[string]$Pattern) {
@@ -71,20 +64,20 @@ function Show-MarkerTable([string]$Label,[string]$Text,[System.Collections.IDict
     Write-Host ''
     Write-Host "=== $Label ===" -ForegroundColor Cyan
     foreach ($key in $Markers.Keys) {
-        $count = Count-Matches $Text ([string]$Markers[$key])
+        $count = Count-Matches $Text $Markers[$key]
         Write-Host ('{0,-36} {1,4}' -f $key,$count)
     }
 }
 
 function Show-Context([string]$Label,[string]$Text,[string]$Pattern,[int]$Before=5,[int]$After=18) {
-    $lines = @($Text -split "`r?`n")
+    $lines = $Text -split "`r?`n"
     $hit = 0
     for ($i=0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match $Pattern) { $hit = $i + 1; break }
     }
     if ($hit -eq 0) {
         Write-Host ''
-        Write-Host "=== ${Label}: NOT FOUND ===" -ForegroundColor Yellow
+        Write-Host ("=== {0}: NOT FOUND ===" -f $Label) -ForegroundColor Yellow
         return
     }
     $start = [Math]::Max(1,$hit-$Before)
@@ -102,9 +95,7 @@ Remove-Item -LiteralPath $tempBuilder -Force -ErrorAction SilentlyContinue
 Invoke-WebRequest -Uri $BuilderUrl -OutFile $tempBuilder
 
 $builderHash = Get-Sha256File $tempBuilder
-if ($builderHash -ne $ExpectedBuilderSha256) {
-    throw "Authoritative V18 builder hash mismatch. Expected $ExpectedBuilderSha256, got $builderHash"
-}
+if ($builderHash -ne $ExpectedBuilderSha256) { throw "Authoritative V18 builder hash mismatch. Expected $ExpectedBuilderSha256, got $builderHash" }
 
 $builderText = [IO.File]::ReadAllText($tempBuilder)
 $csharp = Get-OuterCSharp $builderText
@@ -120,8 +111,8 @@ Write-Host "Builder path   : $BuilderRelativePath"
 Write-Host "Builder SHA256 : $builderHash" -ForegroundColor Green
 Write-Host "GUI SHA256     : $($gui.Sha256)" -ForegroundColor Green
 Write-Host "ENGINE SHA256  : $($engine.Sha256)" -ForegroundColor Green
-Write-Host "GUI lines      : $(@($gui.Text -split "`r?`n").Count)"
-Write-Host "ENGINE lines   : $(@($engine.Text -split "`r?`n").Count)"
+Write-Host "GUI lines      : $(($gui.Text -split "`r?`n").Count)"
+Write-Host "ENGINE lines   : $(($engine.Text -split "`r?`n").Count)"
 
 $guiMarkers = [ordered]@{
     'Resolve-AotRInstall function' = 'function\s+Resolve-AotRInstall\b'
@@ -160,13 +151,12 @@ $engineMarkers = [ordered]@{
 
 Show-MarkerTable 'GUI BASELINE MARKERS' $gui.Text $guiMarkers
 Show-MarkerTable 'ENGINE BASELINE MARKERS' $engine.Text $engineMarkers
-
-Show-Context 'GUI RESOLVER ENTRY' $gui.Text 'function\s+Resolve-AotRInstall\b' 8 80
-Show-Context 'GUI INSTALL PATH VALIDATOR' $gui.Text 'function\s+Get-AotRInstallFromPath\b' 8 70
-Show-Context 'GUI PREFLIGHT' $gui.Text 'function\s+Invoke-Preflight\b' 4 120
+Show-Context 'GUI RESOLVER ENTRY' $gui.Text 'function\s+Resolve-AotRInstall\b' 8 90
+Show-Context 'GUI INSTALL PATH VALIDATOR' $gui.Text 'function\s+Get-AotRInstallFromPath\b' 8 75
+Show-Context 'GUI PREFLIGHT' $gui.Text 'function\s+Invoke-Preflight\b' 4 125
 Show-Context 'GUI REPORT ERROR / DIAGNOSTICS' $gui.Text 'REPORT ERROR' 18 35
 Show-Context 'GUI MESSAGES' $gui.Text '\bMESSAGES\b' 18 35
-Show-Context 'ENGINE INSTALL RESOLUTION' $engine.Text 'function\s+Resolve-AotRInstall\b|launcher_config\.json' 8 80
+Show-Context 'ENGINE INSTALL RESOLUTION' $engine.Text 'function\s+Resolve-AotRInstall\b|launcher_config\.json' 8 90
 
 $critical = [ordered]@{
     BuilderHashMatchesRelease = ($builderHash -eq $ExpectedBuilderSha256)
@@ -181,13 +171,11 @@ $critical = [ordered]@{
 Write-Host ''
 Write-Host '=== CRITICAL 1.0.10 PRESERVATION BASELINE ===' -ForegroundColor Cyan
 foreach ($entry in $critical.GetEnumerator()) {
-    $color = if ([bool]$entry.Value) { 'Green' } else { 'Red' }
+    $color = if ($entry.Value) { 'Green' } else { 'Red' }
     Write-Host ('{0,-34} {1}' -f $entry.Key,$entry.Value) -ForegroundColor $color
 }
 
-if (@($critical.Values | Where-Object { -not [bool]$_ }).Count -gt 0) {
-    throw 'One or more authoritative 1.0.10 baseline invariants failed. Do not patch this builder.'
-}
+if (@($critical.Values | Where-Object { -not $_ }).Count -gt 0) { throw 'One or more authoritative 1.0.10 baseline invariants failed. Do not patch this builder.' }
 
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor Green
