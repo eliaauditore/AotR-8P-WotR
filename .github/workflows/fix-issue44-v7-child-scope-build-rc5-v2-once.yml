@@ -1,0 +1,196 @@
+name: Fix Issue 44 V7 Child Scope and Build RC5 V2 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - .github/workflows/fix-issue44-v7-child-scope-build-rc5-v2-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  rc5:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Patch V7 child transport and zero deterministic gates
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # FINAL_STABLE transformer: child script gets a declared V7Shellcode parameter.
+          p = Path('launcher-source/v19/prepare_final_stable_resource.py')
+          t = p.read_text(encoding='utf-8-sig')
+          old_hash = 'EXPECTED_OUTPUT = "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED"'
+          if t.count(old_hash) != 1: raise SystemExit('FINAL expected hash anchor missing')
+          t = t.replace(old_hash, 'EXPECTED_OUTPUT = "' + ('0'*64) + '"', 1)
+          if t.count('$global:AOTR8P_V7_SHELLCODE_BYTES') != 1: raise SystemExit('FINAL parent-global reference count mismatch')
+          t = t.replace('$global:AOTR8P_V7_SHELLCODE_BYTES', '$V7Shellcode', 1)
+
+          decode_anchor = 'text = raw.decode("utf-8-sig").replace("\\r\\n", "\\n")\n'
+          param_code = '''text = raw.decode("utf-8-sig").replace("\\r\\n", "\\n")
+          param_anchor = "    [single]$DragSpeed = -16.0\\n)"
+          param_replacement = "    [single]$DragSpeed = -16.0,\\n    [Parameter(Mandatory=$true)]\\n    [byte[]]$V7Shellcode\\n)"
+          if text.count(param_anchor) != 1:
+              raise SystemExit("V7 parameter block anchor is not unique")
+          text = text.replace(param_anchor, param_replacement, 1)
+          '''
+          if t.count(decode_anchor) != 1: raise SystemExit('FINAL decode anchor missing')
+          t = t.replace(decode_anchor, param_code, 1)
+
+          old_validation = 'if "AOTR8P_V7_SHELLCODE_BYTES" not in text:\n    raise SystemExit("Managed V7 shellcode resource handoff missing")'
+          new_validation = 'if "$V7Shellcode" not in text:\n    raise SystemExit("Explicit V7 shellcode parameter missing")\nif "AOTR8P_V7_SHELLCODE_BYTES" in text:\n    raise SystemExit("V7 child still depends on parent global scope")'
+          if t.count(old_validation) != 1: raise SystemExit('FINAL validation anchor missing')
+          t = t.replace(old_validation, new_validation, 1)
+          p.write_text(t, encoding='utf-8', newline='\n')
+
+          # Engine transformer: pass the byte[] explicitly to the [PowerShell]::Create() child.
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          t = p.read_text(encoding='utf-8-sig')
+          old_hash = 'EXPECTED_ENGINE_OUT = "95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12"'
+          if t.count(old_hash) != 1: raise SystemExit('Engine expected hash anchor missing')
+          t = t.replace(old_hash, 'EXPECTED_ENGINE_OUT = "' + ('0'*64) + '"', 1)
+
+          marker = 'required_gui = ("System.Net.Http.HttpClient", "AOTR8P_SKIN_BYTES", "AOTR8P_ROW1_PATCH", "AOTR8P_FINAL_STABLE_V7_BYTES", "Get-HttpText", "Save-HttpFile")\n'
+          insertion = '''engine = replace_once(engine, '        [void]$v7.AddParameter("DragSpeed", [single]-16.0)\\n', ''' + "'''" + '''        [void]$v7.AddParameter("DragSpeed", [single]-16.0)
+                  [void]$v7.AddParameter("V7Shellcode", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)
+          ''' + "'''" + ''', "V7 child shellcode parameter")
+
+          required_gui = ("System.Net.Http.HttpClient", "AOTR8P_SKIN_BYTES", "AOTR8P_ROW1_PATCH", "AOTR8P_FINAL_STABLE_V7_BYTES", "Get-HttpText", "Save-HttpFile")
+          '''
+          if t.count(marker) != 1: raise SystemExit('required_gui marker missing')
+          t = t.replace(marker, insertion, 1)
+          old_req = 'required_engine = ("AOTR8P_FINAL_STABLE_V7_BYTES",)'
+          new_req = 'required_engine = ("AOTR8P_FINAL_STABLE_V7_BYTES", "AOTR8P_V7_SHELLCODE_BYTES", "V7Shellcode")'
+          if t.count(old_req) != 1: raise SystemExit('required_engine anchor missing')
+          t = t.replace(old_req, new_req, 1)
+          p.write_text(t, encoding='utf-8', newline='\n')
+
+          # Builder deterministic gates become placeholders until derived below.
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          t = b.read_text(encoding='utf-8-sig')
+          e = 'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12" "Clean engine"'
+          f = 'Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED" "Clean FINAL_STABLE_V7"'
+          if t.count(e)!=1 or t.count(f)!=1: raise SystemExit('Builder current gates missing')
+          t=t.replace(e,'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "'+('0'*64)+'" "Clean engine"',1)
+          t=t.replace(f,'Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "'+('0'*64)+'" "Clean FINAL_STABLE_V7"',1)
+          b.write_text(t,encoding='utf-8',newline='\n')
+
+      - name: Derive Engine hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64='$FinalStableV7Base64'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 -FrozenDonorRoot .\donor-v1.1.1 -OutputRoot .\_RC5_E -LauncherVersion 1.1.2
+            throw 'Unexpected successful derivation'
+          } catch { Write-Host "Expected stop: $($_.Exception.Message)" }
+          $p='.\_RC5_E\work\resources\launcher_engine.ps1'
+          if(-not(Test-Path $p)){throw 'Engine derivation file missing'}
+          $h=(Get-FileHash $p -Algorithm SHA256).Hash.ToUpperInvariant()
+          $txt=Get-Content $p -Raw -Encoding UTF8
+          if($txt -notmatch 'AddParameter\("V7Shellcode", \[byte\[\]\]\$global:AOTR8P_V7_SHELLCODE_BYTES\)'){throw 'Engine V7Shellcode AddParameter missing'}
+          "ENGINE_HASH=$h" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "RC5_ENGINE_SHA256=$h"
+          $global:LASTEXITCODE=0; exit 0
+
+      - name: Pin Engine hash
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h=os.environ['ENGINE_HASH'].strip().upper()
+          p=Path('launcher-source/v19/prepare_clean_resources.py'); t=p.read_text(encoding='utf-8-sig')
+          z='EXPECTED_ENGINE_OUT = "'+('0'*64)+'"'; assert t.count(z)==1
+          p.write_text(t.replace(z,f'EXPECTED_ENGINE_OUT = "{h}"',1),encoding='utf-8',newline='\n')
+          p=Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1'); t=p.read_text(encoding='utf-8-sig')
+          z='Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "'+('0'*64)+'" "Clean engine"'; assert t.count(z)==1
+          p.write_text(t.replace(z,f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{h}" "Clean engine"',1),encoding='utf-8',newline='\n')
+
+      - name: Derive FINAL_STABLE hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64='$FinalStableV7Base64'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 -FrozenDonorRoot .\donor-v1.1.1 -OutputRoot .\_RC5_F -LauncherVersion 1.1.2
+            throw 'Unexpected successful derivation'
+          } catch { Write-Host "Expected stop: $($_.Exception.Message)" }
+          $p='.\_RC5_F\work\resources\final_stable_v7.ps1'
+          if(-not(Test-Path $p)){throw 'FINAL derivation file missing'}
+          $h=(Get-FileHash $p -Algorithm SHA256).Hash.ToUpperInvariant()
+          $txt=Get-Content $p -Raw -Encoding UTF8
+          if($txt -notmatch '\[byte\[\]\]\$V7Shellcode'){throw 'V7Shellcode child parameter missing'}
+          if($txt -match 'AOTR8P_V7_SHELLCODE_BYTES'){throw 'Child still references parent global'}
+          "FINAL_HASH=$h" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "RC5_FINAL_SHA256=$h"
+          $global:LASTEXITCODE=0; exit 0
+
+      - name: Pin FINAL_STABLE hash
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h=os.environ['FINAL_HASH'].strip().upper()
+          p=Path('launcher-source/v19/prepare_final_stable_resource.py'); t=p.read_text(encoding='utf-8-sig')
+          z='EXPECTED_OUTPUT = "'+('0'*64)+'"'; assert t.count(z)==1
+          p.write_text(t.replace(z,f'EXPECTED_OUTPUT = "{h}"',1),encoding='utf-8',newline='\n')
+          p=Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1'); t=p.read_text(encoding='utf-8-sig')
+          z='Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "'+('0'*64)+'" "Clean FINAL_STABLE_V7"'; assert t.count(z)==1
+          p.write_text(t.replace(z,f'Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "{h}" "Clean FINAL_STABLE_V7"',1),encoding='utf-8',newline='\n')
+
+      - name: Commit RC5 source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/prepare_final_stable_resource.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: pass shellcode explicitly to V7 child PowerShell"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build RC5 and exact child-scope gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64='$FinalStableV7Base64'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 -FrozenDonorRoot .\donor-v1.1.1 -OutputRoot .\_RC5 -LauncherVersion 1.1.2
+          $final='.\_RC5\work\resources\final_stable_v7.ps1'
+          $shell='.\_RC5\work\resources\v7_shellcode.bin'
+          $v7=[powershell]::Create()
+          try {
+            [void]$v7.AddScript((Get-Content $final -Raw -Encoding UTF8))
+            [void]$v7.AddParameter('GameDat','Z:\__AOTR_RC5_NONEXISTENT__\game.dat')
+            [void]$v7.AddParameter('AnchorGain',[single]2.0)
+            [void]$v7.AddParameter('DragSpeed',[single]-16.0)
+            [void]$v7.AddParameter('V7Shellcode',[byte[]][IO.File]::ReadAllBytes($shell))
+            try { $null=$v7.Invoke() } catch { }
+            $detail=($v7.Streams.Error | ForEach-Object {$_.ToString()}) -join ' | '
+            if($detail -match 'Shellcode-Resource fehlt|Shellcode-Laengenfehler'){throw "Child scope still broken: $detail"}
+            if($detail -notmatch 'game\.dat|nicht gefunden|not found'){throw "Child scope gate did not reach GameDat validation: $detail"}
+            Write-Host "ISSUE44_CHILD_SCOPE_GATE=PASS :: $detail"
+          } finally { $v7.Dispose() }
+
+      - name: Upload RC5
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC5-Issue44-Fixed
+          path: |
+            _RC5/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _RC5/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _RC5/SHA256SUMS.json
+            _RC5/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
