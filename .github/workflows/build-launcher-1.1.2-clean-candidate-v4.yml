@@ -1,0 +1,49 @@
+name: Build Launcher 1.1.2 Clean Candidate V4
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/build-launcher-1.1.2-clean-candidate-v4.yml"
+      - "launcher-source/v19/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build-clean-1.1.2-v4
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Build and Defender-scan clean 1.1.2 candidate
+        shell: powershell
+        run: |
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_V19_1_1_2_BUILD `
+            -LauncherVersion 1.1.2
+
+      - name: Upload verified candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-Clean-Candidate-V4
+          path: |
+            _V19_1_1_2_BUILD/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _V19_1_1_2_BUILD/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _V19_1_1_2_BUILD/SHA256SUMS.json
+            _V19_1_1_2_BUILD/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
