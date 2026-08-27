@@ -1,0 +1,62 @@
+﻿{
+    "schema":  1,
+    "state":  "MAINTAINED_REPOSITORY_RESOURCES",
+    "provenance_workflow_run":  33123908148,
+    "provenance_artifact_id":  9667562167,
+    "provenance_artifact_digest":  "sha256:c19970b6c90ed41911d4e334b0c5660f5ee6477fae8cee417ad419f37ae71ba9",
+    "provenance_transform_ref":  "166184ec063ded18ff619d3e6a426179d4d886e7",
+    "source_ref":  "v1.1.1 provenance export only; future builds consume repository files directly",
+    "license_warning":  "Materialization is not an ownership or OSS license grant. See ../RESOURCE_OWNERSHIP.json.",
+    "records":  [
+                    {
+                        "name":  "launcher_gui.ps1",
+                        "size":  114784,
+                        "sha256":  "135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD"
+                    },
+                    {
+                        "name":  "launcher_engine.ps1",
+                        "size":  30015,
+                        "sha256":  "5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938"
+                    },
+                    {
+                        "name":  "launcher_skin.png",
+                        "size":  984991,
+                        "sha256":  "BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6"
+                    },
+                    {
+                        "name":  "launcher.ico",
+                        "size":  766,
+                        "sha256":  "3F5784964233DC701B2E9ABA1DD2EF3DDCC47FB5955D0B986FF5D3046DFE1F1A"
+                    },
+                    {
+                        "name":  "final_stable_v7.ps1",
+                        "size":  31434,
+                        "sha256":  "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2"
+                    },
+                    {
+                        "name":  "v7_shellcode.bin",
+                        "size":  1577,
+                        "sha256":  "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A"
+                    },
+                    {
+                        "name":  "row1cleanpatch.png",
+                        "size":  20292,
+                        "sha256":  "D4DC9A47F0E2FD9715D92F8DD4C3831B9AB95F8CA34E98937F019B7574294177"
+                    },
+                    {
+                        "name":  "row2cleanpatch.png",
+                        "size":  19433,
+                        "sha256":  "58B9A7173CE1C9C30C85EE76D15D54E3D40B3E7E14E25D0C1FE5D8EFD89E6D8E"
+                    },
+                    {
+                        "name":  "row3cleanpatch.png",
+                        "size":  20298,
+                        "sha256":  "7F86C02BC02D2E57D66202AF9C526D6FAE13CFC9B7CB1EFF1BB61C165B25278C"
+                    },
+                    {
+                        "name":  "readycleanpatch.png",
+                        "size":  13056,
+                        "sha256":  "35DCBCBE6E625C5C06EC36BAB3CA51A6F4EE29DA3DFF4CAEEDD69BC87D873DF3"
+                    }
+                ]
+}
