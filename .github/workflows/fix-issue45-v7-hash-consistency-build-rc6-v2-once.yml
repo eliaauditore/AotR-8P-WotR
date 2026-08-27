@@ -1,0 +1,130 @@
+name: Fix Issue 45 V7 Hash Consistency and Build RC6 V2 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - '.github/workflows/fix-issue45-v7-hash-consistency-build-rc6-v2-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rc6:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Patch stale Engine V7 hash and wire permanent verifier
+        shell: python
+        run: |
+          from pathlib import Path
+          FINAL='72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2'
+          OLD_ENGINE='083DF914744BF9B78B3D0946337AA6C39C9FA2B980B8EF32094B3575E9A1557E'
+          ZERO='0'*64
+
+          p=Path('launcher-source/v19/prepare_clean_resources.py')
+          t=p.read_text(encoding='utf-8-sig')
+          stale='3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED'
+          if t.count(stale)!=1: raise SystemExit(f'stale V7 hash count={t.count(stale)}')
+          t=t.replace(stale,FINAL,1)
+          gate=f'EXPECTED_ENGINE_OUT = "{OLD_ENGINE}"'
+          if t.count(gate)!=1: raise SystemExit('prepare_clean Engine gate missing')
+          t=t.replace(gate,f'EXPECTED_ENGINE_OUT = "{ZERO}"',1)
+          p.write_text(t,encoding='utf-8',newline='\n')
+
+          p=Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          t=p.read_text(encoding='utf-8-sig')
+          gate=f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{OLD_ENGINE}" "Clean engine"'
+          if t.count(gate)!=1: raise SystemExit('builder Engine gate missing')
+          t=t.replace(gate,f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{ZERO}" "Clean engine"',1)
+
+          source_marker='Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"\n\nforeach ($path in @('
+          source_repl='Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"\n\n& (Join-Path $PSScriptRoot "VERIFY_V7_RESOURCE_CHAIN.ps1") -ResourcesRoot $Resources\n\nforeach ($path in @('
+          if t.count(source_marker)!=1: raise SystemExit('source verifier insertion marker missing')
+          t=t.replace(source_marker,source_repl,1)
+
+          embedded_marker='Write-Host "STATIC CLEANUP PASS" -ForegroundColor Green\n\nCopy-Item -LiteralPath $DonorUi'
+          embedded_repl='Write-Host "STATIC CLEANUP PASS" -ForegroundColor Green\n\n& (Join-Path $PSScriptRoot "VERIFY_V7_RESOURCE_CHAIN.ps1") -ResourcesRoot $Resources -ExePath $Exe\n\nCopy-Item -LiteralPath $DonorUi'
+          if t.count(embedded_marker)!=1: raise SystemExit('embedded verifier insertion marker missing')
+          t=t.replace(embedded_marker,embedded_repl,1)
+          p.write_text(t,encoding='utf-8',newline='\n')
+
+      - name: Derive corrected deterministic Engine resource hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 -FrozenDonorRoot .\donor-v1.1.1 -OutputRoot .\_RC6_DERIVE -LauncherVersion 1.1.2
+            throw 'Unexpected success with zero Engine gate.'
+          }
+          catch { Write-Host "Expected derivation stop: $($_.Exception.Message)" }
+          $p='.\_RC6_DERIVE\work\resources\launcher_engine.ps1'
+          if(-not(Test-Path -LiteralPath $p)){throw 'Derived Engine missing'}
+          $h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToUpperInvariant()
+          $text=Get-Content -LiteralPath $p -Raw -Encoding UTF8
+          if($text -notmatch '\$FinalStableV7Sha256\s*=\s*"72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2"'){throw 'Corrected Engine still has stale FINAL hash'}
+          "ENGINE_HASH=$h" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "RC6_ENGINE_SHA256=$h"
+          $global:LASTEXITCODE=0
+          exit 0
+
+      - name: Pin corrected Engine hash
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h=os.environ['ENGINE_HASH'].strip().upper()
+          z='0'*64
+          if len(h)!=64: raise SystemExit('invalid Engine hash')
+          p=Path('launcher-source/v19/prepare_clean_resources.py')
+          t=p.read_text(encoding='utf-8-sig')
+          a=f'EXPECTED_ENGINE_OUT = "{z}"'
+          if t.count(a)!=1: raise SystemExit('prepare_clean zero Engine gate missing')
+          p.write_text(t.replace(a,f'EXPECTED_ENGINE_OUT = "{h}"',1),encoding='utf-8',newline='\n')
+          p=Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          t=p.read_text(encoding='utf-8-sig')
+          a=f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{z}" "Clean engine"'
+          if t.count(a)!=1: raise SystemExit('builder zero Engine gate missing')
+          p.write_text(t.replace(a,f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{h}" "Clean engine"',1),encoding='utf-8',newline='\n')
+
+      - name: Commit issue 45 fix and permanent verifier wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: fix V7 hash dependency and enforce resource-chain verification"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build and fully verify RC6
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 -FrozenDonorRoot .\donor-v1.1.1 -OutputRoot .\_RC6 -LauncherVersion 1.1.2
+          Write-Host 'RC6_FULL_V7_CHAIN_BUILD_GATE=PASS' -ForegroundColor Green
+
+      - name: Upload RC6 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC6-Issue45-Fixed
+          path: |
+            _RC6/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _RC6/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _RC6/SHA256SUMS.json
+            _RC6/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
