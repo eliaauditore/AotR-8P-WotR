@@ -140,11 +140,15 @@ $SourceTemplate = Join-Path $PSScriptRoot "launcher.cs"
 $source = Get-Content -LiteralPath $SourceTemplate -Raw -Encoding UTF8
 $needle1 = '    private const string FinalStableV7ResourceName = "AotR8P.FinalStableV7";'
 $replace1 = $needle1 + [Environment]::NewLine + '    private const string V7ShellcodeResourceName = "AotR8P.V7Shellcode";'
-if (($source.Split($needle1).Count - 1) -ne 1) { throw "V7 shellcode resource-name insertion anchor is not unique" }
+$first1 = $source.IndexOf($needle1,[StringComparison]::Ordinal)
+$last1 = $source.LastIndexOf($needle1,[StringComparison]::Ordinal)
+if ($first1 -lt 0 -or $first1 -ne $last1) { throw "V7 shellcode resource-name insertion anchor is not unique" }
 $source = $source.Replace($needle1,$replace1)
 $needle2 = '                    runspace.SessionStateProxy.SetVariable("AOTR8P_FINAL_STABLE_V7_BYTES", ReadEmbeddedBytes(FinalStableV7ResourceName));'
 $replace2 = $needle2 + [Environment]::NewLine + '                    runspace.SessionStateProxy.SetVariable("AOTR8P_V7_SHELLCODE_BYTES", ReadEmbeddedBytes(V7ShellcodeResourceName));'
-if (($source.Split($needle2).Count - 1) -ne 1) { throw "V7 shellcode runspace insertion anchor is not unique" }
+$first2 = $source.IndexOf($needle2,[StringComparison]::Ordinal)
+$last2 = $source.LastIndexOf($needle2,[StringComparison]::Ordinal)
+if ($first2 -lt 0 -or $first2 -ne $last2) { throw "V7 shellcode runspace insertion anchor is not unique" }
 $source = $source.Replace($needle2,$replace2)
 $versionCore = ($LauncherVersion -split '-',2)[0]
 $parsed = $null
