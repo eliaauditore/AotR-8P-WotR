@@ -108,7 +108,7 @@ foreach ($pair in @(
 
 $FrozenFinal = Join-Path $Frozen "final_stable_v7.ps1"
 $engineText = Get-Content -LiteralPath $FrozenEngine -Raw -Encoding UTF8
-$finalPattern = "(?s)\$FinalStableV7Base64\s*=\s*@'\s*(.*?)\s*'@"
+$finalPattern = '(?s)\$FinalStableV7Base64\s*=\s*@''\s*(.*?)\s*''@'
 $finalMatch = [regex]::Match($engineText,$finalPattern)
 if (-not $finalMatch.Success) { throw "Could not extract frozen FINAL_STABLE_V7" }
 [IO.File]::WriteAllBytes($FrozenFinal,[Convert]::FromBase64String(($finalMatch.Groups[1].Value -replace "\s","")))
@@ -121,9 +121,11 @@ if ($LASTEXITCODE -ne 0) { throw "GUI/engine clean resource transform failed" }
 if ($LASTEXITCODE -ne 0) { throw "FINAL_STABLE_V7 clean resource transform failed" }
 
 Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "201B90D474AE39EE7776159A79AC025C80C6E95BB263D1CBF53152B3784895EF" "Clean GUI"
-Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "083DF914744BF9B78B3D0946337AA6C39C9FA2B980B8EF32094B3575E9A1557E" "Clean engine"
+Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938" "Clean engine"
 Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2" "Clean FINAL_STABLE_V7"
 Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"
+
+& (Join-Path $PSScriptRoot "VERIFY_V7_RESOURCE_CHAIN.ps1") -ResourcesRoot $Resources
 
 foreach ($path in @(
     (Join-Path $Resources "launcher_gui.ps1"),
@@ -209,6 +211,8 @@ foreach ($forbidden in @("Issue33SkinGzipBase64","GuiGzipBase64","EngineGzipBase
     if ($ascii.Contains($forbidden)) { throw "Forbidden legacy token remains in compiled candidate: $forbidden" }
 }
 Write-Host "STATIC CLEANUP PASS" -ForegroundColor Green
+
+& (Join-Path $PSScriptRoot "VERIFY_V7_RESOURCE_CHAIN.ps1") -ResourcesRoot $Resources -ExePath $Exe
 
 Copy-Item -LiteralPath $DonorUi -Destination (Join-Path $Package "payload_ui.big") -Force
 Copy-Item -LiteralPath $DonorPaper -Destination (Join-Path $Package "payload_paper.inc") -Force

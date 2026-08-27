@@ -11,7 +11,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 EXPECTED_GUI_IN = "23880AF22E3D0121EE79FE14CAA21799BFBE105397E4C66DC21E641D50DAD09C"
 EXPECTED_ENGINE_IN = "94A71026D6A35998D0338DA0FDF9D478DDD92A76C382F23E109B13286F3F5AAA"
 EXPECTED_GUI_OUT = "201B90D474AE39EE7776159A79AC025C80C6E95BB263D1CBF53152B3784895EF"
-EXPECTED_ENGINE_OUT = "083DF914744BF9B78B3D0946337AA6C39C9FA2B980B8EF32094B3575E9A1557E"
+EXPECTED_ENGINE_OUT = "5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938"
 
 
 def sha(path: Path) -> str:
@@ -198,7 +198,7 @@ gui = replace_once(gui, '        $script:EngineRunspace.SessionStateProxy.SetVar
 
 engine = replace_once(engine, "#   - installs byte-identical FINAL_STABLE_V7 via a real temporary PowerShell script\n", "#   - installs byte-identical FINAL_STABLE_V7 from a verified launcher resource\n", "engine source comment")
 engine = regex_once(engine, r"(?ms)^\$FinalStableV7Base64\s*=\s*@'\n.*?^'@\n", "", "FINAL_STABLE_V7 Base64 removal")
-engine = replace_once(engine, '$FinalStableV7Sha256 = "FEAF40B3B231646CD8F7C7099D1E8544090D5010F1C6DB06E5B2F3EF8C0C5F44"\n', '$FinalStableV7Sha256 = "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED"\n', "clean FINAL_STABLE_V7 resource integrity hash")
+engine = replace_once(engine, '$FinalStableV7Sha256 = "FEAF40B3B231646CD8F7C7099D1E8544090D5010F1C6DB06E5B2F3EF8C0C5F44"\n', '$FinalStableV7Sha256 = "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2"\n', "clean FINAL_STABLE_V7 resource integrity hash")
 engine = replace_once(engine, '''    $bytes = [Convert]::FromBase64String(($FinalStableV7Base64 -replace '\\s',''))
     $embeddedHash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
