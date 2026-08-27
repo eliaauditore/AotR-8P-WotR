@@ -1,78 +1,78 @@
 {
-  "schema": 1,
-  "generated_for_launcher": "1.1.1",
-  "plans": {
-    "A8P-INSTALL-001": {
-      "actions": [
-        "reset_install",
-        "retry_launch"
-      ]
-    },
-    "A8P-PAYLOAD-UI-001": {
-      "actions": [
-        "repair_payloads",
-        "reset_runtime",
-        "retry_launch"
-      ]
-    },
-    "A8P-PAYLOAD-PAPER-001": {
-      "actions": [
-        "repair_payloads",
-        "reset_runtime",
-        "retry_launch"
-      ]
-    },
-    "A8P-LEGACY-001": {
-      "actions": [
-        "stop_old_dev_launchers",
-        "stop_legacy_runtime",
-        "retry_launch"
-      ]
-    },
-    "A8P-PROCESS-001": {
-      "actions": [
-        "stop_legacy_runtime",
-        "stop_failed_game",
-        "retry_launch"
-      ]
-    },
-    "A8P-RUNTIME-001": {
-      "actions": [
-        "stop_legacy_runtime",
-        "stop_failed_game",
-        "reset_runtime",
-        "repair_payloads",
-        "retry_launch"
-      ]
-    },
-    "A8P-GAMEPROC-001": {
-      "actions": [
-        "stop_legacy_runtime",
-        "stop_failed_game",
-        "reset_runtime",
-        "retry_launch"
-      ]
-    },
-    "A8P-PERMISSION-001": {
-      "actions": [
-        "stop_failed_game",
-        "retry_launch"
-      ]
-    },
-    "A8P-COMPAT-001": {
-      "actions": [
-        "check_launcher_update"
-      ],
-      "protected": true
-    },
-    "A8P-ENGINE-001": {
-      "actions": [
-        "stop_legacy_runtime",
-        "stop_failed_game",
-        "reset_runtime",
-        "clear_compat_cache",
-        "retry_launch"
-      ]
-    }
-  }
+    "schema":  1,
+    "generated_for_launcher":  "1.1.2",
+    "plans":  {
+                  "A8P-INSTALL-001":  {
+                                          "actions":  [
+                                                          "reset_install",
+                                                          "retry_launch"
+                                                      ]
+                                      },
+                  "A8P-PAYLOAD-UI-001":  {
+                                             "actions":  [
+                                                             "repair_payloads",
+                                                             "reset_runtime",
+                                                             "retry_launch"
+                                                         ]
+                                         },
+                  "A8P-PAYLOAD-PAPER-001":  {
+                                                "actions":  [
+                                                                "repair_payloads",
+                                                                "reset_runtime",
+                                                                "retry_launch"
+                                                            ]
+                                            },
+                  "A8P-LEGACY-001":  {
+                                         "actions":  [
+                                                         "stop_old_dev_launchers",
+                                                         "stop_legacy_runtime",
+                                                         "retry_launch"
+                                                     ]
+                                     },
+                  "A8P-PROCESS-001":  {
+                                          "actions":  [
+                                                          "stop_legacy_runtime",
+                                                          "stop_failed_game",
+                                                          "retry_launch"
+                                                      ]
+                                      },
+                  "A8P-RUNTIME-001":  {
+                                          "actions":  [
+                                                          "stop_legacy_runtime",
+                                                          "stop_failed_game",
+                                                          "reset_runtime",
+                                                          "repair_payloads",
+                                                          "retry_launch"
+                                                      ]
+                                      },
+                  "A8P-GAMEPROC-001":  {
+                                           "actions":  [
+                                                           "stop_legacy_runtime",
+                                                           "stop_failed_game",
+                                                           "reset_runtime",
+                                                           "retry_launch"
+                                                       ]
+                                       },
+                  "A8P-PERMISSION-001":  {
+                                             "actions":  [
+                                                             "stop_failed_game",
+                                                             "retry_launch"
+                                                         ]
+                                         },
+                  "A8P-COMPAT-001":  {
+                                         "actions":  [
+                                                         "check_launcher_update"
+                                                     ],
+                                         "protected":  true
+                                     },
+                  "A8P-ENGINE-001":  {
+                                         "actions":  [
+                                                         "stop_legacy_runtime",
+                                                         "stop_failed_game",
+                                                         "reset_runtime",
+                                                         "clear_compat_cache",
+                                                         "retry_launch"
+                                                     ]
+                                     }
+              }
 }

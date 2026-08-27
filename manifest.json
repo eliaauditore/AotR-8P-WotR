@@ -1,12 +1,12 @@
 {
-  "schema": 1,
-  "launcher_version": "1.1.1",
-  "launcher_url": "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/AotR%208P%20WotR%20Mod.exe",
-  "launcher_sha256": "2141EA9690708EA7A61B7298AD90E0C76CC417FED996AC0CF3685276BA2A4024",
-  "mandatory": false,
-  "repair_manifest_url": "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/repair-manifest.json",
-  "ui_url": "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/payload_ui.big",
-  "ui_sha256": "827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376",
-  "paper_url": "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/payload_paper.inc",
-  "paper_sha256": "3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43"
+    "schema":  1,
+    "launcher_version":  "1.1.2",
+    "launcher_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/AotR%208P%20WotR%20Mod.exe",
+    "launcher_sha256":  "5B4D12B7BF43D72860E27C51A3D8AC7AC00CA53DB58499E41AC735F7B7ECED0E",
+    "mandatory":  false,
+    "repair_manifest_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/repair-manifest.json",
+    "ui_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/payload_ui.big",
+    "ui_sha256":  "827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376",
+    "paper_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/payload_paper.inc",
+    "paper_sha256":  "3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43"
 }
