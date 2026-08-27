@@ -1,0 +1,136 @@
+name: Fix Issue 39 HTTP Output and Build RC2 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/fix-issue39-http-output-and-build-once.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-build:
+    name: fix-issue39-and-build-1.1.2-rc2
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Patch output-silent HttpClient helpers
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          old = '        $response.EnsureSuccessStatusCode()\n'
+          new = '        [void]$response.EnsureSuccessStatusCode()\n'
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'Expected exactly two unsuppressed EnsureSuccessStatusCode calls, found {count}')
+          text = text.replace(old, new)
+          old_hash = 'EXPECTED_GUI_OUT = "74A57F88A4BFF3C2E02B4C158DD3EC42173A623A27813E59815C352C4F566C7D"'
+          if text.count(old_hash) != 1:
+              raise SystemExit('Old clean GUI hash anchor is not unique')
+          text = text.replace(old_hash, 'EXPECTED_GUI_OUT = "' + ('0' * 64) + '"')
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Materialize transformed resources to derive new deterministic GUI hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+              -FrozenDonorRoot .\donor-v1.1.1 `
+              -OutputRoot .\_ISSUE39_HASH_DERIVE `
+              -LauncherVersion 1.1.2
+            throw 'Hash derivation build unexpectedly succeeded with placeholder expected hash.'
+          }
+          catch {
+            Write-Host "Expected hash-derivation stop: $($_.Exception.Message)"
+          }
+          $gui='.\_ISSUE39_HASH_DERIVE\work\resources\launcher_gui.ps1'
+          $engine='.\_ISSUE39_HASH_DERIVE\work\resources\launcher_engine.ps1'
+          if(-not(Test-Path -LiteralPath $gui)){throw 'Derived GUI resource missing'}
+          if(-not(Test-Path -LiteralPath $engine)){throw 'Derived engine resource missing'}
+          $guiHash=(Get-FileHash -LiteralPath $gui -Algorithm SHA256).Hash.ToUpperInvariant()
+          $engineHash=(Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($engineHash -ne 'A2E3545A040503E47237E3869E8F5D3A25FB857C007DA11C17386481D45817EC'){throw "Unexpected engine change: $engineHash"}
+          "GUI_HASH=$guiHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "ISSUE39_FIXED_GUI_SHA256=$guiHash"
+
+      - name: Pin new deterministic GUI hash in transformer and build gate
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+          h = os.environ['GUI_HASH'].strip().upper()
+          if len(h) != 64:
+              raise SystemExit('Invalid derived GUI hash')
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          placeholder = 'EXPECTED_GUI_OUT = "' + ('0' * 64) + '"'
+          if text.count(placeholder) != 1:
+              raise SystemExit('Placeholder GUI hash anchor missing')
+          text = text.replace(placeholder, f'EXPECTED_GUI_OUT = "{h}"')
+          if text.count('[void]$response.EnsureSuccessStatusCode()') != 2:
+              raise SystemExit('HTTP output suppression regression')
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          old = 'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "74A57F88A4BFF3C2E02B4C158DD3EC42173A623A27813E59815C352C4F566C7D" "Clean GUI"'
+          new = f'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "{h}" "Clean GUI"'
+          if bt.count(old) != 1:
+              raise SystemExit('Build-runner old GUI hash anchor missing or not unique')
+          b.write_text(bt.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+      - name: Commit confirmed issue 39 fix to feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: suppress HttpClient response output for JSON repair"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build package and Defender-scan 1.1.2 RC2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_V19_1_1_2_RC2 `
+            -LauncherVersion 1.1.2
+          $gui='.\_V19_1_1_2_RC2\work\resources\launcher_gui.ps1'
+          $txt=Get-Content -LiteralPath $gui -Raw -Encoding UTF8
+          if(([regex]::Matches($txt,'\[void\]\$response\.EnsureSuccessStatusCode\(\)')).Count -ne 2){throw 'Issue #39 suppression not present twice in built GUI resource'}
+          if($txt -match '(?m)^\s*\$response\.EnsureSuccessStatusCode\(\)\s*$'){throw 'Unsuppressed EnsureSuccessStatusCode remains in built GUI resource'}
+          Write-Host 'ISSUE39_HTTP_OUTPUT_REGRESSION_GATE=PASS'
+
+      - name: Upload RC2 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC2-Issue39-Fixed
+          path: |
+            _V19_1_1_2_RC2/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _V19_1_1_2_RC2/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _V19_1_1_2_RC2/SHA256SUMS.json
+            _V19_1_1_2_RC2/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
