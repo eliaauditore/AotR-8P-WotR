@@ -1,0 +1,167 @@
+name: Stage Launcher 1.1.2 Exact Candidate V2 Once
+
+on:
+  push:
+    branches:
+      - release/1.1.2
+    paths:
+      - '.github/workflows/stage-v1.1.2-release-candidate-v2-once.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  stage-release:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v5
+        with:
+          ref: release/1.1.2
+          fetch-depth: 0
+
+      - name: Preserve exact source line endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout exact accepted source
+        uses: actions/checkout@v5
+        with:
+          ref: 59a18ed496b254f6854f2261c85422fdbafe1063
+          path: accepted-source
+          fetch-depth: 1
+
+      - name: Copy final source only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $dst='launcher-source\v19'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          foreach($name in @(
+            'BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1',
+            'VERIFY_V7_RESOURCE_CHAIN.ps1',
+            'apply_issue43_recheck_flow.py',
+            'launcher.cs',
+            'prepare_clean_resources.py',
+            'prepare_final_stable_resource.py'
+          )) {
+            Copy-Item -LiteralPath (Join-Path 'accepted-source\launcher-source\v19' $name) -Destination (Join-Path $dst $name) -Force
+          }
+          $builder=(Get-FileHash -LiteralPath 'launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1' -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($builder -ne '27F45FF2CF4825D2A7ED443FF8166D2BECCB03800D55460BF9647BF5F4A41082'){throw "Builder hash mismatch: $builder"}
+          Write-Host 'FINAL_SOURCE_ALLOWLIST_GATE=PASS'
+
+      - name: Download exact runtime-tested RC7 artifact
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path '.\rc7-artifact' | Out-Null
+          gh run download 33098884873 --repo $env:GITHUB_REPOSITORY --name 'AotR-8P-WotR-1.1.2-RC7-Issue43-Recheck-AutoLaunch' --dir '.\rc7-artifact'
+          $inner='.\rc7-artifact\AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip'
+          $h=(Get-FileHash -LiteralPath $inner -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($h -ne 'F67DFE9E2E4215982891D58302445AF95CF177A341E95D54E8D4C0F01EE1D097'){throw "RC7 ZIP hash mismatch: $h"}
+          Expand-Archive -LiteralPath $inner -DestinationPath '.\rc7-exact' -Force
+
+      - name: Verify and copy exact public files
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='.\rc7-exact'
+          $expected=@('AotR 8P WotR Mod.exe','manifest.json','payload_paper.inc','payload_ui.big','repair-manifest.json') | Sort-Object
+          $actual=@(Get-ChildItem -LiteralPath $root -File | Select-Object -ExpandProperty Name | Sort-Object)
+          if(Compare-Object $expected $actual){throw 'RC7 public file set mismatch'}
+          $hashes=@{
+            'AotR 8P WotR Mod.exe'='5B4D12B7BF43D72860E27C51A3D8AC7AC00CA53DB58499E41AC735F7B7ECED0E'
+            'manifest.json'='26851416B61745E0009550A924F54E8AF47992693A01728E348DBC530FEAC729'
+            'repair-manifest.json'='B2BEEBF586F95D2E2F6B4A86F142FEF40561E72C907A4BDB3FA5D597377855AA'
+            'payload_ui.big'='827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376'
+            'payload_paper.inc'='3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43'
+          }
+          foreach($name in $hashes.Keys){
+            $h=(Get-FileHash -LiteralPath (Join-Path $root $name) -Algorithm SHA256).Hash.ToUpperInvariant()
+            if($h -ne $hashes[$name]){throw "$name hash mismatch: $h"}
+          }
+          $manifest=Get-Content -LiteralPath (Join-Path $root 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          if([string]$manifest.launcher_version -ne '1.1.2'){throw 'Manifest version mismatch'}
+          if(([string]$manifest.launcher_sha256).ToUpperInvariant() -ne $hashes['AotR 8P WotR Mod.exe']){throw 'Manifest EXE hash mismatch'}
+          $repair=Get-Content -LiteralPath (Join-Path $root 'repair-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          if([string]$repair.generated_for_launcher -ne '1.1.2'){throw 'Repair manifest version mismatch'}
+          foreach($name in $expected){Copy-Item -LiteralPath (Join-Path $root $name) -Destination (Join-Path $PWD $name) -Force}
+          Write-Host 'EXACT_RC7_PUBLIC_BYTES_GATE=PASS'
+
+      - name: Write final guarded checkpoint
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path 'docs\release' | Out-Null
+          $text=@'
+          # Launcher 1.1.2 Release Checkpoint
+
+          ## Status
+
+          `1.1.2` is staged from the exact RC7 artifact that passed real runtime acceptance. ModDB AV acceptance is **not yet complete**: Issue #38 remains the final distribution blocker until these exact release bytes pass current Defender/cloud protection in a clean Windows environment with no prior allow/exclusion for this launcher.
+
+          ## Exact staged candidate
+
+          - Version: `1.1.2`
+          - Release branch: `release/1.1.2`
+          - Accepted development source: `59a18ed496b254f6854f2261c85422fdbafe1063`
+          - RC7 workflow run: `33098884873`
+          - RC7 artifact ID: `9657563731`
+          - RC7 public ZIP SHA256: `F67DFE9E2E4215982891D58302445AF95CF177A341E95D54E8D4C0F01EE1D097`
+          - Exact runtime-tested EXE SHA256: `5B4D12B7BF43D72860E27C51A3D8AC7AC00CA53DB58499E41AC735F7B7ECED0E`
+          - Manifest SHA256: `26851416B61745E0009550A924F54E8AF47992693A01728E348DBC530FEAC729`
+          - Repair manifest SHA256: `B2BEEBF586F95D2E2F6B4A86F142FEF40561E72C907A4BDB3FA5D597377855AA`
+          - UI SHA256: `827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376`
+          - Paper SHA256: `3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43`
+          - Canonical 1.1.2 builder SHA256: `27F45FF2CF4825D2A7ED443FF8166D2BECCB03800D55460BF9647BF5F4A41082`
+
+          ## Runtime acceptance
+
+          RC7 was user-confirmed for standalone startup, Auto-Repair, post-repair full re-check, automatic launch only after a clean re-check, clean launcher handoff/exit, real game launch, 8-player WotR rows, strategic-map zoom and strategic-map drag. No `A8P-ENGINE-001` remained.
+
+          ## Integrity evidence
+
+          The final source state passed Windows PowerShell 5.1 parsing, V7 source-chain verification, explicit child-shellcode parameter binding, embedded Engine/V7/Shellcode byte/hash verification, embedded cross-resource consistency, static cleanup, and hosted Defender scanning. Release-staging run `33100026999` independently rebuilt the exact pinned source through all permanent gates before staging and passed; its push was intentionally blocked by unrelated line-ending changes, not by any release-integrity failure.
+
+          ## Release safety
+
+          `main` and protected `v1.1.1` remain untouched pending guarded PR merge. Historical RC failures remain preserved on the development branch. The legacy .NET Framework `csc.exe` build is byte-nondeterministic, so later recompiles must never silently replace the exact runtime-tested EXE above. Do not ask users to disable Defender, whitelist the launcher, or restore a quarantined release as the distribution solution.
+          '@
+          [IO.File]::WriteAllText((Join-Path $PWD 'docs\release\LAUNCHER_1_1_2_RELEASE_CHECKPOINT.md'),$text.Trim()+[Environment]::NewLine,(New-Object Text.UTF8Encoding($false)))
+
+      - name: Commit only release allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- 'AotR 8P WotR Mod.exe' manifest.json repair-manifest.json payload_ui.big payload_paper.inc \
+            launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 \
+            launcher-source/v19/VERIFY_V7_RESOURCE_CHAIN.ps1 \
+            launcher-source/v19/apply_issue43_recheck_flow.py \
+            launcher-source/v19/launcher.cs \
+            launcher-source/v19/prepare_clean_resources.py \
+            launcher-source/v19/prepare_final_stable_resource.py \
+            docs/release/LAUNCHER_1_1_2_RELEASE_CHECKPOINT.md
+          mapfile -t staged < <(git diff --cached --name-only)
+          printf 'STAGED: %s\n' "${staged[@]}"
+          expected=(
+            'AotR 8P WotR Mod.exe'
+            'docs/release/LAUNCHER_1_1_2_RELEASE_CHECKPOINT.md'
+            'launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1'
+            'launcher-source/v19/VERIFY_V7_RESOURCE_CHAIN.ps1'
+            'launcher-source/v19/apply_issue43_recheck_flow.py'
+            'launcher-source/v19/launcher.cs'
+            'launcher-source/v19/prepare_clean_resources.py'
+            'launcher-source/v19/prepare_final_stable_resource.py'
+            'manifest.json'
+            'repair-manifest.json'
+          )
+          if [[ ${#staged[@]} -ne ${#expected[@]} ]]; then echo 'Unexpected staged file count'; exit 1; fi
+          for i in "${!expected[@]}"; do [[ "${staged[$i]}" == "${expected[$i]}" ]] || { echo "Unexpected staged path: ${staged[$i]} != ${expected[$i]}"; exit 1; }; done
+          git commit -m 'Stage exact runtime-tested launcher 1.1.2 release candidate'
+          git push origin HEAD:release/1.1.2
