@@ -1,0 +1,51 @@
+name: Validate Guardian Tools
+
+on:
+  pull_request:
+    paths:
+      - "tools/guardian/**"
+      - ".github/workflows/validate-guardian-tools.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/guardian/**"
+      - ".github/workflows/validate-guardian-tools.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: guardian-tools
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse Guardian PowerShell scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = @(Get-ChildItem -LiteralPath 'tools\guardian' -Filter '*.ps1' -File -Recurse)
+          if ($scripts.Count -eq 0) {
+              throw 'No Guardian PowerShell scripts found under tools\guardian.'
+          }
+
+          foreach ($script in $scripts) {
+              $tokens = $null
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile(
+                  $script.FullName,
+                  [ref]$tokens,
+                  [ref]$errors
+              )
+
+              if ($errors -and $errors.Count -gt 0) {
+                  $errors | ForEach-Object {
+                      Write-Error ("{0}:{1}:{2} {3}" -f $script.FullName, $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message)
+                  }
+                  throw "PowerShell parser errors found in $($script.FullName)."
+              }
+
+              Write-Host "PS5.1 PARSE OK: $($script.FullName)"
+          }
