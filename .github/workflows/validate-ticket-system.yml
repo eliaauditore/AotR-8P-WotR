@@ -2,12 +2,6 @@ name: Validate Ticket System
 
 on:
   pull_request:
-    paths:
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/workflows/**"
-      - ".github/labels.yml"
-      - "docs/support-bundle.schema.json"
-      - "docs/TICKETING.md"
   push:
     branches:
       - feature/github-ticket-system
