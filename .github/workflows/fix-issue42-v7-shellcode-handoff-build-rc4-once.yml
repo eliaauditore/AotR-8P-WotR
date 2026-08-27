@@ -98,12 +98,13 @@ jobs:
           bt = bt.replace(old, f'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "{h}" "Clean GUI"', 1)
           b.write_text(bt, encoding='utf-8', newline='\n')
 
-      - name: Commit issue 42 runtime fix
+      - name: Commit issue 42 runtime fix and cleanup temporary triggers
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/placeholder-do-not-use.txt .github/workflows/fix-issue42-v7-shellcode-handoff-build-rc4-trigger.txt .github/workflows/fix-issue42-v7-shellcode-handoff-build-rc4-trigger2.txt 2>/dev/null || true
           git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
           git commit -m "Launcher 1.1.2: pass V7 shellcode into engine runspace"
           git push origin HEAD:feature/launcher-1.1.2-clean-architecture
@@ -133,3 +134,5 @@ jobs:
             _V19_1_1_2_RC4/DEFENDER_SCAN.txt
           if-no-files-found: error
           retention-days: 7
+
+# trigger: rc4-handoff-1
