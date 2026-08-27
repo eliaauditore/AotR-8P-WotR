@@ -1,0 +1,119 @@
+name: Build Issue43 Recheck Auto-Launch RC7 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - '.github/workflows/build-issue43-recheck-auto-launch-rc7-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rc7:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Prove RC6 baseline and generate clean GUI resource
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_ISSUE43_BASE `
+            -LauncherVersion 1.1.2
+          Write-Host 'ISSUE43_RC6_BASELINE_GATE=PASS' -ForegroundColor Green
+
+      - name: Derive Issue43 GUI hash from exact RC6 GUI
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $gui='.\_ISSUE43_BASE\work\resources\launcher_gui.ps1'
+          $out = & python .\launcher-source\v19\apply_issue43_recheck_flow.py $gui 2>&1
+          $out | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { throw 'Issue43 GUI derivation failed.' }
+          $line = @($out | Where-Object { [string]$_ -match '^ISSUE43_GUI_SHA256=([A-F0-9]{64})$' } | Select-Object -Last 1)
+          if (-not $line) { throw 'Issue43 derived GUI hash was not emitted.' }
+          $hash = ([regex]::Match([string]$line,'^ISSUE43_GUI_SHA256=([A-F0-9]{64})$')).Groups[1].Value
+          "ISSUE43_GUI_HASH=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "ISSUE43_DERIVED_GUI_SHA256=$hash" -ForegroundColor Green
+
+      - name: Pin Issue43 transform into canonical clean builder
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+
+          h = os.environ['ISSUE43_GUI_HASH'].strip().upper()
+          if len(h) != 64:
+              raise SystemExit('Invalid ISSUE43_GUI_HASH')
+
+          p = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          t = p.read_text(encoding='utf-8-sig')
+
+          marker = '''& $Python (Join-Path $PSScriptRoot "prepare_clean_resources.py") $FrozenGui $FrozenEngine $Resources
+          if ($LASTEXITCODE -ne 0) { throw "GUI/engine clean resource transform failed" }
+          & $Python (Join-Path $PSScriptRoot "prepare_final_stable_resource.py") $FrozenFinal (Join-Path $Resources "final_stable_v7.ps1") (Join-Path $Resources "v7_shellcode.bin")
+          '''
+          replacement = f'''& $Python (Join-Path $PSScriptRoot "prepare_clean_resources.py") $FrozenGui $FrozenEngine $Resources
+          if ($LASTEXITCODE -ne 0) {{ throw "GUI/engine clean resource transform failed" }}
+          & $Python (Join-Path $PSScriptRoot "apply_issue43_recheck_flow.py") (Join-Path $Resources "launcher_gui.ps1") --expected-output "{h}"
+          if ($LASTEXITCODE -ne 0) {{ throw "Issue43 post-repair health re-check transform failed" }}
+          & $Python (Join-Path $PSScriptRoot "prepare_final_stable_resource.py") $FrozenFinal (Join-Path $Resources "final_stable_v7.ps1") (Join-Path $Resources "v7_shellcode.bin")
+          '''
+          if t.count(marker) != 1:
+              raise SystemExit(f'Builder Issue43 transform insertion marker count={t.count(marker)}')
+          t = t.replace(marker, replacement, 1)
+
+          old = 'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "201B90D474AE39EE7776159A79AC025C80C6E95BB263D1CBF53152B3784895EF" "Clean GUI"'
+          new = f'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "{h}" "Clean GUI Issue43"'
+          if t.count(old) != 1:
+              raise SystemExit('Builder old GUI hash gate missing')
+          t = t.replace(old, new, 1)
+
+          p.write_text(t, encoding='utf-8', newline='\n')
+
+      - name: Commit Issue43 builder integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: recheck health before post-repair auto-launch"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build RC7 through full RC6 and Issue43 gates
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_RC7 `
+            -LauncherVersion 1.1.2
+          Write-Host 'ISSUE43_FULL_RECHECK_AUTO_LAUNCH_GATE=PASS' -ForegroundColor Green
+
+      - name: Upload RC7 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC7-Issue43-Recheck-AutoLaunch
+          path: |
+            _RC7/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _RC7/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _RC7/SHA256SUMS.json
+            _RC7/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
