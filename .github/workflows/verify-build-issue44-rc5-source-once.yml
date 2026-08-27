@@ -1,0 +1,76 @@
+name: Verify and Build Issue 44 RC5 Source Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - .github/workflows/verify-build-issue44-rc5-source-once.yml
+
+jobs:
+  verify-rc5:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Build committed RC5 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64='$FinalStableV7Base64'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_RC5_VERIFIED `
+            -LauncherVersion 1.1.2
+
+      - name: Exact child PowerShell scope regression gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $final='.\_RC5_VERIFIED\work\resources\final_stable_v7.ps1'
+          $shell='.\_RC5_VERIFIED\work\resources\v7_shellcode.bin'
+          $engine='.\_RC5_VERIFIED\work\resources\launcher_engine.ps1'
+          $engineText=Get-Content $engine -Raw -Encoding UTF8
+          if($engineText -notmatch 'AddParameter\("V7Shellcode", \[byte\[\]\]\$global:AOTR8P_V7_SHELLCODE_BYTES\)'){throw 'Engine explicit V7Shellcode transport missing'}
+
+          $finalText=Get-Content $final -Raw -Encoding UTF8
+          if($finalText -notmatch '\[byte\[\]\]\$V7Shellcode'){throw 'FINAL_STABLE V7Shellcode parameter missing'}
+          if($finalText -match 'AOTR8P_V7_SHELLCODE_BYTES'){throw 'FINAL_STABLE still depends on parent global scope'}
+
+          $v7=[powershell]::Create()
+          $invokeError=$null
+          try {
+            [void]$v7.AddScript($finalText)
+            [void]$v7.AddParameter('GameDat','Z:\__AOTR_RC5_NONEXISTENT__\game.dat')
+            [void]$v7.AddParameter('AnchorGain',[single]2.0)
+            [void]$v7.AddParameter('DragSpeed',[single]-16.0)
+            [void]$v7.AddParameter('V7Shellcode',[byte[]][IO.File]::ReadAllBytes($shell))
+            try { $null=$v7.Invoke() } catch { $invokeError=$_.Exception.Message }
+            $streamDetail=($v7.Streams.Error | ForEach-Object {$_.ToString()}) -join ' | '
+            $detail=(($invokeError,$streamDetail | Where-Object {-not [string]::IsNullOrWhiteSpace($_)}) -join ' | ')
+            if($detail -match 'Shellcode-Resource fehlt|Shellcode-Laengenfehler'){throw "Child scope still broken: $detail"}
+            if($detail -notmatch 'game\.dat|nicht gefunden|not found'){throw "Child scope gate did not reach GameDat validation: $detail"}
+            Write-Host "ISSUE44_CHILD_SCOPE_GATE=PASS :: $detail"
+          }
+          finally { $v7.Dispose() }
+
+      - name: Upload verified RC5
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC5-Issue44-Verified
+          path: |
+            _RC5_VERIFIED/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _RC5_VERIFIED/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _RC5_VERIFIED/SHA256SUMS.json
+            _RC5_VERIFIED/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
