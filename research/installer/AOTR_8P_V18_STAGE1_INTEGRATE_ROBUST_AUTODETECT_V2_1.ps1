@@ -41,10 +41,8 @@ if ($count -ne 1) {
 }
 $text = $text.Replace($old,$new)
 
-$driveRefDefects = @([regex]::Matches($text,'\$[A-Za-z_][A-Za-z0-9_]*:'))
-if ($driveRefDefects.Count -ne 0) {
-    $values = ($driveRefDefects | ForEach-Object Value | Sort-Object -Unique) -join ', '
-    throw "Unexpected remaining variable-colon parser candidates: $values"
+if (([regex]::Matches($text,'\$key:')).Count -ne 0) {
+    throw 'The known $key: interpolation defect is still present after hotfix.'
 }
 
 $tokens = $null
