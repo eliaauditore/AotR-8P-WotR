@@ -10,7 +10,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 EXPECTED_GUI_IN = "23880AF22E3D0121EE79FE14CAA21799BFBE105397E4C66DC21E641D50DAD09C"
 EXPECTED_ENGINE_IN = "94A71026D6A35998D0338DA0FDF9D478DDD92A76C382F23E109B13286F3F5AAA"
-EXPECTED_GUI_OUT = "4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC"
+EXPECTED_GUI_OUT = "201B90D474AE39EE7776159A79AC025C80C6E95BB263D1CBF53152B3784895EF"
 EXPECTED_ENGINE_OUT = "95BE76742453CB4637A3926B02E09D51643484A6F4313525B43C7DDBD137BF12"
 
 
@@ -193,6 +193,7 @@ gui = replace_once(gui, '''function Repair-ModPayloads {
 
 gui = replace_once(gui, '        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)\n', '''        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", [string]$global:AOTR8P_LAUNCHER_VERSION)
         $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_FINAL_STABLE_V7_BYTES", [byte[]]$global:AOTR8P_FINAL_STABLE_V7_BYTES)
+        $script:EngineRunspace.SessionStateProxy.SetVariable("AOTR8P_V7_SHELLCODE_BYTES", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)
 ''', "engine resource handoff")
 
 engine = replace_once(engine, "#   - installs byte-identical FINAL_STABLE_V7 via a real temporary PowerShell script\n", "#   - installs byte-identical FINAL_STABLE_V7 from a verified launcher resource\n", "engine source comment")
