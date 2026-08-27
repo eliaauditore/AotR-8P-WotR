@@ -7,7 +7,12 @@ Set-StrictMode -Version Latest
 
 $ReleaseCommit = '1303e0a6b268b082e9352ded1461fa8d794f16d3'
 $BuilderRelativePath = 'launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_0_10.ps1'
-$ExpectedBuilderSha256 = '7D847B66CAF060F3E1C5FD539DA3DF6E97865421651608CDD98898342C1BB2E0'
+# IMPORTANT: 7D847B66... is the documented local pre-promotion builder hash.
+# The immutable file stored in release commit 1303e0a6... has Git blob 9d8975828106a572f43344e57891014860d489d4
+# and raw SHA256 8BDD8745... . This audit pins the actual released bytes.
+$DocumentedPrePromotionBuilderSha256 = '7D847B66CAF060F3E1C5FD539DA3DF6E97865421651608CDD98898342C1BB2E0'
+$ExpectedBuilderSha256 = '8BDD8745931B41AA2B062FB9ADCE8BBBD7EA2A33F4C0946C20A409D89639271A'
+$ExpectedGitBlobSha = '9d8975828106a572f43344e57891014860d489d4'
 $BuilderUrl = "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/$ReleaseCommit/$BuilderRelativePath"
 
 function Get-Sha256File([string]$Path) {
@@ -95,7 +100,7 @@ Remove-Item -LiteralPath $tempBuilder -Force -ErrorAction SilentlyContinue
 Invoke-WebRequest -Uri $BuilderUrl -OutFile $tempBuilder
 
 $builderHash = Get-Sha256File $tempBuilder
-if ($builderHash -ne $ExpectedBuilderSha256) { throw "Authoritative V18 builder hash mismatch. Expected $ExpectedBuilderSha256, got $builderHash" }
+if ($builderHash -ne $ExpectedBuilderSha256) { throw "Authoritative V18 builder hash mismatch. Expected released bytes $ExpectedBuilderSha256, got $builderHash" }
 
 $builderText = [IO.File]::ReadAllText($tempBuilder)
 $csharp = Get-OuterCSharp $builderText
@@ -106,13 +111,15 @@ Write-Host '============================================================' -Foreg
 Write-Host ' AOTR 8P V18 / 1.0.10 AUTHORITATIVE BASELINE AUDIT V1.1' -ForegroundColor Cyan
 Write-Host ' READ ONLY / RELEASE-PINNED / POWERSHELL 7+' -ForegroundColor Cyan
 Write-Host '============================================================' -ForegroundColor Cyan
-Write-Host "Release commit : $ReleaseCommit"
-Write-Host "Builder path   : $BuilderRelativePath"
-Write-Host "Builder SHA256 : $builderHash" -ForegroundColor Green
-Write-Host "GUI SHA256     : $($gui.Sha256)" -ForegroundColor Green
-Write-Host "ENGINE SHA256  : $($engine.Sha256)" -ForegroundColor Green
-Write-Host "GUI lines      : $(($gui.Text -split "`r?`n").Count)"
-Write-Host "ENGINE lines   : $(($engine.Text -split "`r?`n").Count)"
+Write-Host "Release commit                    : $ReleaseCommit"
+Write-Host "Builder path                      : $BuilderRelativePath"
+Write-Host "Released builder SHA256           : $builderHash" -ForegroundColor Green
+Write-Host "Released Git blob SHA             : $ExpectedGitBlobSha"
+Write-Host "Documented pre-promotion SHA256   : $DocumentedPrePromotionBuilderSha256" -ForegroundColor DarkYellow
+Write-Host "GUI SHA256                        : $($gui.Sha256)" -ForegroundColor Green
+Write-Host "ENGINE SHA256                     : $($engine.Sha256)" -ForegroundColor Green
+Write-Host "GUI lines                         : $(($gui.Text -split "`r?`n").Count)"
+Write-Host "ENGINE lines                      : $(($engine.Text -split "`r?`n").Count)"
 
 $guiMarkers = [ordered]@{
     'Resolve-AotRInstall function' = 'function\s+Resolve-AotRInstall\b'
@@ -159,7 +166,7 @@ Show-Context 'GUI MESSAGES' $gui.Text '\bMESSAGES\b' 18 35
 Show-Context 'ENGINE INSTALL RESOLUTION' $engine.Text 'function\s+Resolve-AotRInstall\b|launcher_config\.json' 8 90
 
 $critical = [ordered]@{
-    BuilderHashMatchesRelease = ($builderHash -eq $ExpectedBuilderSha256)
+    BuilderHashMatchesReleasedBytes = ($builderHash -eq $ExpectedBuilderSha256)
     GuiHasReportError = ((Count-Matches $gui.Text 'REPORT ERROR') -gt 0)
     GuiHasMessages = ((Count-Matches $gui.Text '\bMESSAGES\b') -gt 0)
     GuiHasDynamicStatus = ((Count-Matches $gui.Text '\bStatusRowsHost\b') -gt 0)
