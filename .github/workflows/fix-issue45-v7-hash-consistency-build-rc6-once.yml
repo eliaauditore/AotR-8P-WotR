@@ -1,0 +1,245 @@
+name: Fix Issue 45 V7 Hash Consistency and Build RC6 Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - '.github/workflows/fix-issue45-v7-hash-consistency-build-rc6-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rc6:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Patch stale V7 hash and add permanent cross-resource gates
+        shell: python
+        run: |
+          from pathlib import Path
+
+          FINAL = '72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2'
+          OLD_ENGINE = '083DF914744BF9B78B3D0946337AA6C39C9FA2B980B8EF32094B3575E9A1557E'
+          ZERO = '0' * 64
+
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          t = p.read_text(encoding='utf-8-sig')
+          old_final = '3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED'
+          if t.count(old_final) != 1:
+              raise SystemExit(f'stale FINAL hash occurrence count={t.count(old_final)}')
+          t = t.replace(old_final, FINAL, 1)
+          old_engine_gate = f'EXPECTED_ENGINE_OUT = "{OLD_ENGINE}"'
+          if t.count(old_engine_gate) != 1:
+              raise SystemExit('prepare_clean engine hash gate anchor missing')
+          t = t.replace(old_engine_gate, f'EXPECTED_ENGINE_OUT = "{ZERO}"', 1)
+          p.write_text(t, encoding='utf-8', newline='\n')
+
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          old_builder_engine = f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{OLD_ENGINE}" "Clean engine"'
+          if bt.count(old_builder_engine) != 1:
+              raise SystemExit('builder engine hash gate anchor missing')
+          bt = bt.replace(old_builder_engine, f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{ZERO}" "Clean engine"', 1)
+
+          marker = 'Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"\n\nforeach ($path in @('
+          if bt.count(marker) != 1:
+              raise SystemExit('builder cross-resource insertion marker missing')
+          gate = r'''Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"
+
+# Permanent V7 dependency gates. Individual file hashes are insufficient: the Engine
+# contains the expected hash of FINAL_STABLE_V7 and must agree with the actual resource.
+$engineResourcePath = Join-Path $Resources "launcher_engine.ps1"
+$finalResourcePath = Join-Path $Resources "final_stable_v7.ps1"
+$shellcodeResourcePath = Join-Path $Resources "v7_shellcode.bin"
+$engineResourceText = Get-Content -LiteralPath $engineResourcePath -Raw -Encoding UTF8
+$finalResourceText = Get-Content -LiteralPath $finalResourcePath -Raw -Encoding UTF8
+$actualFinalResourceHash = Get-Sha256 $finalResourcePath
+$actualShellcodeResourceHash = Get-Sha256 $shellcodeResourcePath
+$engineFinalHashMatch = [regex]::Match($engineResourceText,'(?m)^\$FinalStableV7Sha256\s*=\s*"([A-Fa-f0-9]{64})"\s*$')
+if (-not $engineFinalHashMatch.Success) {
+    throw "V7 cross-resource gate: Engine FINAL_STABLE_V7 hash constant missing."
+}
+$engineExpectedFinalHash = $engineFinalHashMatch.Groups[1].Value.ToUpperInvariant()
+if ($engineExpectedFinalHash -ne $actualFinalResourceHash) {
+    throw "V7 cross-resource gate mismatch. Engine expects $engineExpectedFinalHash but FINAL_STABLE_V7 is $actualFinalResourceHash"
+}
+if ($actualShellcodeResourceHash -ne "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A") {
+    throw "V7 cross-resource gate: shellcode resource hash drifted: $actualShellcodeResourceHash"
+}
+if ($engineResourceText.IndexOf('AddParameter("V7Shellcode", [byte[]]$global:AOTR8P_V7_SHELLCODE_BYTES)',[StringComparison]::Ordinal) -lt 0) {
+    throw "V7 cross-resource gate: Engine child AddParameter handoff missing."
+}
+if ($finalResourceText.IndexOf('[byte[]]$V7Shellcode',[StringComparison]::Ordinal) -lt 0) {
+    throw "V7 cross-resource gate: FINAL_STABLE_V7 explicit V7Shellcode parameter missing."
+}
+if ($finalResourceText.IndexOf('AOTR8P_V7_SHELLCODE_BYTES',[StringComparison]::Ordinal) -ge 0) {
+    throw "V7 cross-resource gate: FINAL_STABLE_V7 still depends on parent global scope."
+}
+Write-Host "V7_CROSS_RESOURCE_HASH_GATE=PASS :: FINAL=$actualFinalResourceHash SHELLCODE=$actualShellcodeResourceHash" -ForegroundColor Green
+Write-Host "V7_CHILD_PARAMETER_CHAIN_SOURCE_GATE=PASS" -ForegroundColor Green
+
+foreach ($path in @('''
+          bt = bt.replace(marker, gate, 1)
+          b.write_text(bt, encoding='utf-8', newline='\n')
+
+      - name: Derive deterministic Engine hash after issue 45 fix
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 -FrozenDonorRoot .\donor-v1.1.1 -OutputRoot .\_RC6_DERIVE -LauncherVersion 1.1.2
+            throw 'Unexpected successful derivation with zero Engine hash.'
+          }
+          catch {
+            Write-Host "Expected derivation stop: $($_.Exception.Message)"
+          }
+          $p='.\_RC6_DERIVE\work\resources\launcher_engine.ps1'
+          if(-not(Test-Path -LiteralPath $p)){throw 'Derived Engine resource missing'}
+          $h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToUpperInvariant()
+          $txt=Get-Content -LiteralPath $p -Raw -Encoding UTF8
+          if($txt -notmatch '\$FinalStableV7Sha256\s*=\s*"72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2"'){throw 'Derived Engine does not expect actual RC5 FINAL hash'}
+          if($txt -notmatch 'AddParameter\("V7Shellcode", \[byte\[\]\]\$global:AOTR8P_V7_SHELLCODE_BYTES\)'){throw 'Derived Engine lost V7Shellcode child handoff'}
+          "ENGINE_HASH=$h" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "RC6_ENGINE_SHA256=$h"
+          $global:LASTEXITCODE=0
+          exit 0
+
+      - name: Pin deterministic Engine hash
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          h = os.environ['ENGINE_HASH'].strip().upper()
+          if len(h) != 64:
+              raise SystemExit('invalid ENGINE_HASH')
+          zero = '0' * 64
+
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          t = p.read_text(encoding='utf-8-sig')
+          anchor = f'EXPECTED_ENGINE_OUT = "{zero}"'
+          if t.count(anchor) != 1:
+              raise SystemExit('prepare_clean zero engine gate missing')
+          p.write_text(t.replace(anchor, f'EXPECTED_ENGINE_OUT = "{h}"', 1), encoding='utf-8', newline='\n')
+
+          p = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          t = p.read_text(encoding='utf-8-sig')
+          anchor = f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{zero}" "Clean engine"'
+          if t.count(anchor) != 1:
+              raise SystemExit('builder zero engine gate missing')
+          p.write_text(t.replace(anchor, f'Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "{h}" "Clean engine"', 1), encoding='utf-8', newline='\n')
+
+      - name: Commit issue 45 source and permanent gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: enforce V7 cross-resource hash consistency"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build RC6 with permanent source consistency gates
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 -FrozenDonorRoot .\donor-v1.1.1 -OutputRoot .\_RC6 -LauncherVersion 1.1.2
+
+      - name: Verify compiled EXE embedded V7 chain byte-for-byte
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe='.\_RC6\package\AotR 8P WotR Mod.exe'
+          $resources='.\_RC6\work\resources'
+          $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+
+          function Get-BytesHash([byte[]]$Bytes) {
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToUpperInvariant() }
+            finally { $sha.Dispose() }
+          }
+          function Read-ManifestBytes([Reflection.Assembly]$Assembly,[string]$Name) {
+            $s=$Assembly.GetManifestResourceStream($Name)
+            if($null -eq $s){throw "Embedded resource missing: $Name"}
+            try {
+              $m=New-Object IO.MemoryStream
+              try { $s.CopyTo($m); return [byte[]]$m.ToArray() }
+              finally { $m.Dispose() }
+            }
+            finally { $s.Dispose() }
+          }
+
+          $checks=@(
+            @('AotR8P.EngineScript','launcher_engine.ps1'),
+            @('AotR8P.FinalStableV7','final_stable_v7.ps1'),
+            @('AotR8P.V7Shellcode','v7_shellcode.bin')
+          )
+          foreach($c in $checks){
+            $embedded=Read-ManifestBytes $asm $c[0]
+            $source=[IO.File]::ReadAllBytes((Join-Path $resources $c[1]))
+            $eh=Get-BytesHash $embedded
+            $sh=Get-BytesHash $source
+            if($eh -ne $sh){throw "Embedded resource mismatch $($c[0]): embedded=$eh source=$sh"}
+            Write-Host "EMBEDDED_RESOURCE_MATCH=PASS :: $($c[0]) :: $eh" -ForegroundColor Green
+          }
+
+          $engineText=[Text.Encoding]::UTF8.GetString((Read-ManifestBytes $asm 'AotR8P.EngineScript')).TrimStart([char]0xFEFF)
+          $finalBytes=Read-ManifestBytes $asm 'AotR8P.FinalStableV7'
+          $finalHash=Get-BytesHash $finalBytes
+          $m=[regex]::Match($engineText,'(?m)^\$FinalStableV7Sha256\s*=\s*"([A-Fa-f0-9]{64})"\s*$')
+          if(-not $m.Success){throw 'Embedded Engine FINAL hash constant missing'}
+          if($m.Groups[1].Value.ToUpperInvariant() -ne $finalHash){throw "Embedded Engine/V7 hash mismatch: engine=$($m.Groups[1].Value) actual=$finalHash"}
+          Write-Host "EMBEDDED_V7_CROSS_RESOURCE_GATE=PASS :: $finalHash" -ForegroundColor Green
+
+      - name: Exact child PowerShell V7Shellcode transport gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $final='.\_RC6\work\resources\final_stable_v7.ps1'
+          $shell='.\_RC6\work\resources\v7_shellcode.bin'
+          $v7=[powershell]::Create()
+          try {
+            [void]$v7.AddScript((Get-Content -LiteralPath $final -Raw -Encoding UTF8))
+            [void]$v7.AddParameter('GameDat','Z:\__AOTR_RC6_NONEXISTENT__\game.dat')
+            [void]$v7.AddParameter('AnchorGain',[single]2.0)
+            [void]$v7.AddParameter('DragSpeed',[single]-16.0)
+            [void]$v7.AddParameter('V7Shellcode',[byte[]][IO.File]::ReadAllBytes($shell))
+            $caught=''
+            try { $null=$v7.Invoke() } catch { $caught=$_.Exception.ToString() }
+            $stream=($v7.Streams.Error | ForEach-Object {$_.ToString()}) -join ' | '
+            $detail=($caught + ' | ' + $stream).Trim(' ','|')
+            if($detail -match 'Shellcode-Resource fehlt|Shellcode-Laengenfehler|V7Shellcode.*parameter|parameter.*V7Shellcode'){
+              throw "V7 child transport still broken: $detail"
+            }
+            if([string]::IsNullOrWhiteSpace($detail)){
+              throw 'V7 child transport gate produced no expected failure for deliberately missing game.dat.'
+            }
+            Write-Host "ISSUE44_V7_CHILD_TRANSPORT_GATE=PASS :: advanced beyond shellcode transport" -ForegroundColor Green
+            Write-Host "EXPECTED_CHILD_FAILURE=$detail"
+          }
+          finally { $v7.Dispose() }
+
+      - name: Upload RC6 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC6-Issue45-Fixed
+          path: |
+            _RC6/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _RC6/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _RC6/SHA256SUMS.json
+            _RC6/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
