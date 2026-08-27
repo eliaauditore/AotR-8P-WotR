@@ -120,7 +120,7 @@ if ($LASTEXITCODE -ne 0) { throw "GUI/engine clean resource transform failed" }
 & $Python (Join-Path $PSScriptRoot "prepare_final_stable_resource.py") $FrozenFinal (Join-Path $Resources "final_stable_v7.ps1") (Join-Path $Resources "v7_shellcode.bin")
 if ($LASTEXITCODE -ne 0) { throw "FINAL_STABLE_V7 clean resource transform failed" }
 
-Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "74A57F88A4BFF3C2E02B4C158DD3EC42173A623A27813E59815C352C4F566C7D" "Clean GUI"
+Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC" "Clean GUI"
 Assert-Hash (Join-Path $Resources "launcher_engine.ps1") "A2E3545A040503E47237E3869E8F5D3A25FB857C007DA11C17386481D45817EC" "Clean engine"
 Assert-Hash (Join-Path $Resources "final_stable_v7.ps1") "3D18D76722485E4716E8D8074831C6778484DE405BCDF949E9BD93C8AB5EFFED" "Clean FINAL_STABLE_V7"
 Assert-Hash (Join-Path $Resources "v7_shellcode.bin") "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A" "V7 shellcode resource"

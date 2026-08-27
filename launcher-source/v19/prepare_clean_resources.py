@@ -10,7 +10,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 EXPECTED_GUI_IN = "23880AF22E3D0121EE79FE14CAA21799BFBE105397E4C66DC21E641D50DAD09C"
 EXPECTED_ENGINE_IN = "94A71026D6A35998D0338DA0FDF9D478DDD92A76C382F23E109B13286F3F5AAA"
-EXPECTED_GUI_OUT = "74A57F88A4BFF3C2E02B4C158DD3EC42173A623A27813E59815C352C4F566C7D"
+EXPECTED_GUI_OUT = "4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC"
 EXPECTED_ENGINE_OUT = "A2E3545A040503E47237E3869E8F5D3A25FB857C007DA11C17386481D45817EC"
 
 
@@ -54,7 +54,7 @@ function Get-HttpText([string]$Url) {
     if ([string]::IsNullOrWhiteSpace($Url)) { throw "HTTP URL is empty." }
     $response = $script:HttpClient.GetAsync($Url).GetAwaiter().GetResult()
     try {
-        $response.EnsureSuccessStatusCode()
+        [void]$response.EnsureSuccessStatusCode()
         return $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
     }
     finally { $response.Dispose() }
@@ -64,7 +64,7 @@ function Save-HttpFile([string]$Url,[string]$Destination) {
     if ([string]::IsNullOrWhiteSpace($Url)) { throw "HTTP URL is empty." }
     $response = $script:HttpClient.GetAsync($Url).GetAwaiter().GetResult()
     try {
-        $response.EnsureSuccessStatusCode()
+        [void]$response.EnsureSuccessStatusCode()
         $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
         [IO.File]::WriteAllBytes($Destination,$bytes)
     }
