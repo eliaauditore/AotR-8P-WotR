@@ -2,14 +2,6 @@ name: Validate Release Consistency
 
 on:
   pull_request:
-    paths:
-      - "AotR 8P WotR Mod.exe"
-      - "manifest.json"
-      - "repair-manifest.json"
-      - "payload_ui.big"
-      - "payload_paper.inc"
-      - "launcher-source/**"
-      - ".github/workflows/validate-release-consistency.yml"
   push:
     branches:
       - main
