@@ -24,7 +24,6 @@ internal static class Program
     private const string LauncherVersion = "__LAUNCHER_VERSION__";
     private const string UpdateManifestUrl = "__UPDATE_URL__";
 
-
     private const string SkinResourceName = "AotR8P.LauncherSkin";
     private const string GuiResourceName = "AotR8P.GuiScript";
     private const string EngineResourceName = "AotR8P.EngineScript";
@@ -33,7 +32,6 @@ internal static class Program
     private const string Row2PatchResourceName = "AotR8P.Row2Patch";
     private const string Row3PatchResourceName = "AotR8P.Row3Patch";
     private const string ReadyPatchResourceName = "AotR8P.ReadyPatch";
-    private const string LauncherSkinSha256 = "BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6";
 
     private static byte[] ReadEmbeddedBytes(string resourceName)
     {
@@ -58,43 +56,6 @@ internal static class Program
             text = text.Substring(1);
         return text;
     }
-
-    private static string Sha256Bytes(byte[] bytes)
-    {
-        using (SHA256 sha = SHA256.Create())
-            return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "");
-    }
-
-    private static void EnsureLauncherSkin()
-    {
-        byte[] expectedBytes = ReadEmbeddedBytes(SkinResourceName);
-        string embeddedHash = Sha256Bytes(expectedBytes);
-        if (!String.Equals(embeddedHash, LauncherSkinSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Embedded launcher skin SHA256 mismatch: " + embeddedHash);
-
-        string skinPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "internal", "assets", "launcher_skin.png");
-        if (File.Exists(skinPath))
-        {
-            string existingHash = Sha256(skinPath);
-            if (String.Equals(existingHash, LauncherSkinSha256, StringComparison.OrdinalIgnoreCase))
-                return;
-        }
-
-        string directory = Path.GetDirectoryName(skinPath);
-        if (!Directory.Exists(directory))
-            Directory.CreateDirectory(directory);
-
-        using (FileStream output = new FileStream(skinPath, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            output.Write(expectedBytes, 0, expectedBytes.Length);
-            output.Flush(true);
-        }
-
-        string writtenHash = Sha256(skinPath);
-        if (!String.Equals(writtenHash, LauncherSkinSha256, StringComparison.OrdinalIgnoreCase))
-            throw new IOException("Materialized launcher skin SHA256 mismatch: " + writtenHash);
-    }
-
 
     [STAThread]
     private static void Main(string[] args)
@@ -131,16 +92,11 @@ internal static class Program
             }
             catch (Exception updateEx)
             {
-                // Network/update failure must never block the known-good local launcher.
                 LogUpdate("Update check failed: " + FormatException(updateEx));
             }
 
-            // Only the launcher version that actually survives the update check may own
-            // the desktop shortcut. Rebuild it from scratch so Windows cannot keep stale
-            // Shell Link tracking metadata for a replaced self-updating executable.
             TryCreateDesktopShortcut(exePath, root);
 
-            EnsureLauncherSkin();
             string guiScript = ReadEmbeddedUtf8(GuiResourceName);
             string engineScript = ReadEmbeddedUtf8(EngineResourceName);
 
@@ -148,15 +104,12 @@ internal static class Program
             {
                 using (Runspace runspace = RunspaceFactory.CreateRunspace())
                 {
-                    // WPF must be created on an STA thread. A fresh PowerShell runspace
-                    // otherwise defaults to a worker thread that can be MTA, causing
-                    // XamlReader.Load() / Window construction to fail. Keep the GUI
-                    // runspace on this [STAThread] Main thread.
                     runspace.ApartmentState = ApartmentState.STA;
                     runspace.ThreadOptions = PSThreadOptions.UseCurrentThread;
                     runspace.Open();
                     runspace.SessionStateProxy.SetVariable("AOTR8P_PACKAGE_ROOT", root);
                     runspace.SessionStateProxy.SetVariable("AOTR8P_ENGINE_SCRIPT", engineScript);
+                    runspace.SessionStateProxy.SetVariable("AOTR8P_SKIN_BYTES", ReadEmbeddedBytes(SkinResourceName));
                     runspace.SessionStateProxy.SetVariable("AOTR8P_LAUNCHER_VERSION", LauncherVersion);
                     runspace.SessionStateProxy.SetVariable("AOTR8P_UPDATE_MANIFEST_URL", UpdateManifestUrl);
                     runspace.SessionStateProxy.SetVariable("AOTR8P_FINAL_STABLE_V7_BYTES", ReadEmbeddedBytes(FinalStableV7ResourceName));
@@ -225,195 +178,247 @@ internal static class Program
         public bool mandatory { get; set; }
     }
 
-    internal static string ManualUpdateCheck()
-    {
-        try
-        {
-            string exePath = Process.GetCurrentProcess().MainModule.FileName;
-            string root = Path.GetDirectoryName(exePath);
-            bool updatedCopie = TrySelfUpdate(exePath, root, false);
-            if (updatedCopy) return "UPDATED";
-            return "UP-TO-DATE";
-        }
-        catch (Exception ex)
-        {
-            LogUpdate("Manual update check failed: " + FormatException(ex));
-            return "ERROR: " + ex.Message;
-        }
-    }
-
     private static bool TrySelfUpdate(string exePath, string root)
     {
-        return TrySelfUpdate(exePath, root, true);
-    }
-
-    private static bool TrySelfUpdate(string exePath, string root, bool startNewCopy)
-    {
-        if (String.IsNullOrWhiteSpace(UpdateManifestUrl)) return false;
-
-        string json = DownloadUtf8String(UpdateManifestUrl);
-        JavaScriptSerializer js = new JavaScriptSerializer();
-        UpdateManifest manifest = js.Deserialize<UpdateManifest>(json);
-        if (manifest == null)
-            throw new InvalidDataException("Update manifest could not be parsed.");
-
-        Version current;
-
-        if (!TryVersion(LauncherVersion, out current))
-            throw new InvalidOperationException("Local launcher version is invalid: " + LauncherVersion);
-
-        string remoteText = manifest.launcher_version;
-        string coreRemote = String.IsNullOrWhiteSpace(remoteText) ? String.Empty : remoteText.Split(new char[] { '-' }, 2)[0];
-        Version remote;
-
-        if (!Version.TryParse(coreRemote, out remote))
-            throw new InvalidDataException("Remote launcher version is invalid: " + remoteText);
-
-        if (remote <= current)
+        if (String.IsNullOrWhiteSpace(UpdateManifestUrl) ||
+            UpdateManifestUrl.StartsWith("__", StringComparison.Ordinal))
             return false;
 
-        if (String.IsNullOrWhiteSpace(manifest.launcher_url)) ||
+        LogUpdate("Checking " + UpdateManifestUrl + " from launcher " + LauncherVersion);
+        string json = DownloadUtf8String(UpdateManifestUrl);
+        JavaScriptSerializer ser = new JavaScriptSerializer();
+        UpdateManifest manifest = ser.Deserialize<UpdateManifest>(json);
+        if (manifest == null || manifest.schema != 1)
+            return false;
+
+        Version current;
+        Version remote;
+        if (!TryVersion(LauncherVersion, out current) ||
+            !TryVersion(manifest.launcher_version, out remote))
+            return false;
+
+        if (remote.CompareTo(current) <= 0)
+        {
+            LogUpdate("Launcher is current. Remote=" + manifest.launcher_version);
+            return false;
+        }
+
+        LogUpdate("Update available: " + LauncherVersion + " -> " + manifest.launcher_version);
+        if (String.IsNullOrWhiteSpace(manifest.launcher_url) ||
             String.IsNullOrWhiteSpace(manifest.launcher_sha256))
-            throw new InvalidDataException("Remote manifest is missing launcher_url or launcher_sha256.");
+            return false;
 
         string updateDir = Path.Combine(root, ".launcher_update");
         Directory.CreateDirectory(updateDir);
 
-        string newExe = Path.Combine(updateDir, "AotR 8P WotR Mod.new.exe");
-        string updateExe = Path.Combine(updateDir, "AotR8P_WotR_Update_" + Guid.NewGuid().ToString("N") + ".exe");
+        string packagePath = Path.Combine(updateDir, "launcher.download");
+        string helperPath = Path.Combine(updateDir, "AotR 8P WotR Mod Update.exe");
+        TryDelete(packagePath);
+        TryDelete(helperPath);
 
-        TryDelete(newExe);
-        TryDelete(updateExe);
-
-        DownloadToFile(manifest.launcher_url, newExe);
-
-        string downloadedHash = Sha256(newExe);
-        if (!String.Equals(downloadedHash, manifest.launcher_sha256, StringComparison.OrdinalIgnoreCase))
+        DownloadToFile(manifest.launcher_url, packagePath);
+        string actual = Sha256(packagePath);
+        if (!String.Equals(actual, manifest.launcher_sha256.Trim(), StringComparison.OrdinalIgnoreCase))
         {
-            TryDelete(newExe);
-            throw new InvalidDataException("Update SHA256 mismatch. Expected " + manifest.launcher_sha256 + " but got " + downloadedHash + ".");
+            TryDelete(packagePath);
+            throw new InvalidDataException("Launcher update SHA256 verification failed.");
+        }
+        LogUpdate("Downloaded update package verified: " + actual);
+
+        File.Copy(packagePath, helperPath, true);
+        string helperHash = Sha256(helperPath);
+        if (!String.Equals(helperHash, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            TryDelete(helperPath);
+            TryDelete(packagePath);
+            throw new InvalidDataException("Materialized update helper SHA256 mismatch.");
         }
 
-        File.Copy(exePath, updateExe, true);
-
-        string arguments =
-            "--apply-update " +
-            QuoteArgument(proot) + " " +
-            QuoteArgument(exePath) + " " +
-            QuoteArgument(newExe) + " " +
-            QuoteArgument(UpdateManifestUrl) + " " +
-            QuoteArgument(UpdateManifestUrl) + " " +
-            QuoteArgument(LauncherVersion) + " " +
-            (startNewCopy ? "1" : "0");
-
         ProcessStartInfo psi = new ProcessStartInfo();
-        psi.FileName = updateExe;
-        psi.Arguments = arguments;
+        psi.FileName = helperPath;
+        psi.Arguments =
+            "--apply-update " +
+            QuoteArgument(exePath) + " " +
+            Process.GetCurrentProcess().Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " +
+            actual;
         psi.WorkingDirectory = updateDir;
-        psi.UseShellExecute = true;
-        psi.Verb = "runas";
-
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.WindowStyle = ProcessWindowStyle.Hidden;
         Process.Start(psi);
-
-        LogUpdate("Launcher update staged to " + manifest.launcher_version + " with sha256 " + downloadedHash + " via " + updateDir);
+        LogUpdate("Verified install-staged update helper started; launcher will exit for replacement.");
         return true;
+    }
+
+    internal static string ManualUpdateCheck()
+    {
+        string exePath = Process.GetCurrentProcess().MainModule.FileName;
+        string root = Path.GetDirectoryName(exePath);
+        try
+        {
+            if (TrySelfUpdate(exePath, root))
+                return "UPDATE_STARTED";
+            return "UP_TO_DATE|" + LauncherVersion;
+        }
+        catch (Exception ex)
+        {
+            LogUpdate("Manual update check failed: " + FormatException(ex));
+            return "ERROR|" + FormatException(ex);
+        }
     }
 
     private static void RunUpdateHelper(string[] args)
     {
-        if (args.Length < 7)
-        {
-            MessageBox.Show("Launcher update helper received invalid arguments.", "AotR 8P War of the Ring", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-
-        string root = Path.GetFullPath(args[1]);
-        string targetExe = Path.GetFullPath(args[2]);
-        string newExe = Path.GetFullPath(args[3]);
-        string manifestUrl = args[4];
-        string updateManifestUrl = args[5];
-        string fromVersion = args[6];
-        bool startNewCopy = (args.Length < 8 || args[7] != "0");
-
-        if (!String.Equals(Path.GetDirectoryName(targetExe).TrimEnd(Path.DirectorySeparatorChar), root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Update helper target is outside the expected package root.");
-
-        string updateDir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
-
-        LogUpdate("Update helper started. root=" + root + " target=" + targetExe + " new=" + newExe + " from=" + fromVersion + " startNew=" + startNewCopy);
-
+        string stagedExe = null;
+        string backupExe = null;
         try
         {
-            for (int i = 0; i < 120; i++)
+            if (args.Length < 4)
+                throw new ArgumentException("Invalid update-helper arguments.");
+
+            string targetExe = Path.GetFullPath(args[1]);
+            int parentPid;
+            if (!Int32.TryParse(args[2], out parentPid) || parentPid <= 0)
+                throw new ArgumentException("Invalid launcher PID.");
+
+            string expectedHash = (args[3] ?? String.Empty).Trim();
+            if (expectedHash.Length != 64)
+                throw new ArgumentException("Invalid expected SHA256.");
+
+            string helperExe = Process.GetCurrentProcess().MainModule.FileName;
+            string helperHash = Sha256(helperExe);
+            if (!String.Equals(helperHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Update helper SHA256 does not match the verified download.");
+
+            LogUpdate("Update helper " + LauncherVersion + " started for PID " +
+                parentPid.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+
+            try
             {
-                if (!IsProcessRunningFromPath(targetExe)) break;
-                Thread.Sleep(250);
+                Process parent = Process.GetProcessById(parentPid);
+                parent.WaitForExit(30000);
             }
+            catch (ArgumentException) { }
+            catch (Exception ex) { LogUpdate("Parent wait warning: " + ex.Message); }
 
-            if (IsProcessRunningFromPath(targetExe))
-                throw new IOException("Target launcher process did not exit within the update wait window.");
+            string targetDir = Path.GetDirectoryName(targetExe);
+            stagedExe = Path.Combine(targetDir, "AotR 8P WotR Mod.update-staged.exe");
+            backupExe = Path.Combine(targetDir, "AotR 8P WotR Mod.rollback.exe");
+            TryDelete(stagedExe);
+            TryDelete(backupExe);
 
-            for (int i = 0; i < 20; i++)
-            {
-                try
-                {
-                    File.Copy(newExe, targetExe, true);
-                    break;
-                }
-                catch (IOException)
-                {
-                    Thread.Sleep(250);
-                    if (i == 19) throw;
-                }
-            }
+            File.Copy(helperExe, stagedExe, true);
+            if (!String.Equals(Sha256(stagedExe), expectedHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Staged launcher SHA256 mismatch.");
 
-            string installedHash = Sha256(targetExe);
-            string sourceHash = Sha256(newExe);
-            if (!String.Equals(installedHash, sourceHash, StringComparison.OrdinalIgnoreCase))
+            bool targetExisted = File.Exists(targetExe);
+            if (targetExisted)
+                File.Copy(targetExe, backupExe, true);
+
+            ReplaceFileWithRetries(stagedExe, targetExe);
+            if (!String.Equals(Sha256(targetExe), expectedHash, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Installed launcher SHA256 mismatch after replacement.");
 
-            TryDelete(newExe);
+            TryDelete(backupExe);
+            TryDelete(Path.Combine(Path.GetDirectoryName(helperExe), "launcher.download"));
+            LogUpdate("Update installed successfully: " + expectedHash);
 
-            if (startNewCopy)
-            {
-                ProcessStartInfo next = new ProcessStartInfo();
-                next.FileName = targetExe;
-                next.WorkingDirectory = root;
-                next.UseShellExecute = true;
-                Process.Start(next);
-            }
-
-            LogUpdate("Update helper installed new launcher sha256 " + installedHash);
+            ProcessStartInfo relaunch = new ProcessStartInfo();
+            relaunch.FileName = targetExe;
+            relaunch.WorkingDirectory = targetDir;
+            relaunch.UseShellExecute = true;
+            Process.Start(relaunch);
         }
         catch (Exception ex)
         {
             LogUpdate("Update helper failed: " + FormatException(ex));
+            try
+            {
+                if (!String.IsNullOrWhiteSpace(backupExe) && File.Exists(backupExe))
+                {
+                    if (!String.IsNullOrWhiteSpace(stagedExe)) TryDelete(stagedExe);
+                    ReplaceFileWithRetries(backupExe, args != null && args.Length > 1 ? Path.GetFullPath(args[1]) : backupExe + ".restored");
+                    LogUpdate("Rollback completed after update failure.");
+                }
+            }
+            catch (Exception rollbackEx)
+            {
+                LogUpdate("Rollback failed: " + FormatException(rollbackEx));
+            }
+
             MessageBox.Show(
-                "Launcher update failed.\r\n\r\n" + FormatException(ex),
+                "Launcher update failed. The previous launcher was preserved when possible.\r\n\r\n" + FormatException(ex),
                 "AotR 8P War of the Ring",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
+        finally
+        {
+            TryDelete(stagedExe);
+            if (!String.IsNullOrWhiteSpace(backupExe) && File.Exists(backupExe))
+            {
+                try { File.Delete(backupExe); } catch { }
+            }
+        }
+    }
+
+    private static void ReplaceFileWithRetries(string source, string destination)
+    {
+        Exception last = null;
+        for (int attempt = 0; attempt < 80; attempt++)
+        {
+            try
+            {
+                if (File.Exists(destination))
+                    File.Delete(destination);
+                File.Move(source, destination);
+                return;
+            }
+            catch (IOException ex)
+            {
+                last = ex;
+                Thread.Sleep(250);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                last = ex;
+                Thread.Sleep(250);
+            }
+        }
+        throw new IOException("Could not replace launcher executable after repeated retries.", last);
+    }
+
+    private static bool IsProcessRunningFromPath(string fullPath)
+    {
+        string expected = Path.GetFullPath(fullPath);
+        foreach (Process process in Process.GetProcesses())
+        {
+            try
+            {
+                string candidate = process.MainModule == null ? null : process.MainModule.FileName;
+                if (!String.IsNullOrWhiteSpace(candidate) &&
+                    String.Equals(Path.GetFullPath(candidate), expected, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch { }
+            finally { process.Dispose(); }
+        }
+        return false;
     }
 
     private static void CleanupStaleUpdateFiles()
     {
-        // Clean both the V15 install-owned staging directory and legacy V6/V14
-        // %TEMP% helpers. Failures are intentionally non-fatal because an update helper
-        // may still be exiting while the newly installed launcher starts.
         try
         {
             string currentExe = Process.GetCurrentProcess().MainModule.FileName;
             string root = Path.GetDirectoryName(currentExe);
             string updateDir = Path.Combine(root, ".launcher_update");
-
             if (Directory.Exists(updateDir))
             {
                 foreach (string file in Directory.GetFiles(updateDir))
                 {
                     if (String.Equals(Path.GetFullPath(file), Path.GetFullPath(currentExe), StringComparison.OrdinalIgnoreCase))
                         continue;
-
                     try
                     {
                         DateTime ageReference = File.GetLastWriteTimeUtc(file);
@@ -422,30 +427,10 @@ internal static class Program
                     }
                     catch { }
                 }
-
                 try
                 {
                     if (Directory.Exists(updateDir) && Directory.GetFileSystemEntries(updateDir).Length == 0)
-                        Directory.Delete(updateDir, false);
-                }
-                catch { }
-            }
-        }
-        catch { }
-
-        try
-        {
-            string tempDir = Path.GetTempPath();
-            string currentExe = Process.GetCurrentProcess().MainModule.FileName;
-            foreach (string file in Directory.GetFiles(tempDir, "AotR8P_WotR_Update_*.exe"))
-            {
-                if (String.Equals(Path.GetFullPath(file), Path.GetFullPath(currentExe), StringComparison.OrdinalIgnoreCase))
-                    continue;
-                try
-                {
-                    DateTime ageReference = File.GetLastWriteTimeUtc(file);
-                    if ((DateTime.UtcNow - ageReference).TotalSeconds >= 5)
-                        File.Delete(file);
+                        Directory.Delete(updateDir);
                 }
                 catch { }
             }
@@ -473,7 +458,7 @@ internal static class Program
 
     private static HttpWebRequest CreateHttpRequest(string url)
     {
-        ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; // TLS 1.2
+        ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
         HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
         request.Method = "GET";
         request.UserAgent = "AotR-8P-WotR-Launcher/" + LauncherVersion;
@@ -490,9 +475,7 @@ internal static class Program
         using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
         using (Stream input = response.GetResponseStream())
         using (StreamReader reader = new StreamReader(input, Encoding.UTF8, true))
-      {
             return reader.ReadToEnd();
-        }
     }
 
     private static void DownloadToFile(string url, string path)
@@ -501,7 +484,7 @@ internal static class Program
         using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
         using (Stream input = response.GetResponseStream())
         using (FileStream output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
-      {
+        {
             input.CopyTo(output);
             output.Flush(true);
         }
@@ -521,13 +504,12 @@ internal static class Program
     {
         using (SHA256 sha = SHA256.Create())
         using (FileStream fs = File.OpenRead(path))
-        {
             return BitConverter.ToString(sha.ComputeHash(fs)).Replace("-", "");
-        }
     }
 
     private static void TryDelete(string path)
     {
+        if (String.IsNullOrWhiteSpace(path)) return;
         try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 
@@ -537,40 +519,26 @@ internal static class Program
         {
             string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             string shortcutPath = Path.Combine(desktop, "AotR 8P WotR Mod.lnk");
-
-            // Do not edit an existing .lnk in place. Windows Shell Links can retain
-            // distributed-link-tracking data for the old executable object even when
-            // TargetPath text is unchanged. A fresh .lnk always resolves the current
-            // executable at exePath.
-            if (File.Exists(shortcutPath))
-                File.Delete(shortcutPath);
+            try { if (File.Exists(shortcutPath)) File.Delete(shortcutPath); } catch { }
 
             Type shellType = Type.GetTypeFromProgID("WScript.Shell");
             if (shellType == null) return;
-
             object shell = Activator.CreateInstance(shellType);
-            object shortcut = shellType.InvokeMember(
-                "CreateShortcut", BindingFlags.InvokeMethod, null, shell,
-                new object[] { shortcutPath });
-
+            object shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
             Type shortcutType = shortcut.GetType();
             shortcutType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { exePath });
             shortcutType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { root });
+            shortcutType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "AotR 8P War of the Ring" });
             shortcutType.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { exePath + ",0" });
-            shortcutType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut,
-                new object[] { "Age of the Ring - 8 Player War of the Ring" });
             shortcutType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
-            LogUpdate("Desktop shortcut rebuilt for launcher " + LauncherVersion + ": " + shortcutPath);
+            if (shortcut is System.Runtime.InteropServices.ComTypes.IStream) { }
+            System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shortcut);
+            System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
         }
-        catch (Exception ex)
-        {
-            LogUpdate("Desktop shortcut rebuild failed: " + ex.Message);
-        }
+        catch { }
     }
 }
 
-// Public bridge used by the embedded WPF PowerShell GUI. It deliberately exposes
-// only one narrow operation: ask the already-tested native updater to check now.
 public static class AotR8PUpdateBridge
 {
     public static string CheckNow()
