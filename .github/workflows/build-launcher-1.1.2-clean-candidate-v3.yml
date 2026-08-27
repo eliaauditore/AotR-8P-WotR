@@ -22,6 +22,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Checkout frozen launcher 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: work/frozen-checkout
+          fetch-depth: 1
+
       - name: Extract and verify frozen 1.1.1 resources
         shell: powershell
         run: |
@@ -30,9 +37,9 @@ jobs:
           Add-Type -AssemblyName System.Drawing
           New-Item -ItemType Directory -Force -Path work\frozen,work\resources,out | Out-Null
 
-          cmd /c "git show \"v1.1.1:AotR 8P WotR Mod.exe\" > \"work\frozen\donor.exe\""
-          cmd /c "git show \"v1.1.1:payload_ui.big\" > \"work\frozen\payload_ui.big\""
-          cmd /c "git show \"v1.1.1:payload_paper.inc\" > \"work\frozen\payload_paper.inc\""
+          Copy-Item -LiteralPath 'work\frozen-checkout\AotR 8P WotR Mod.exe' -Destination 'work\frozen\donor.exe' -Force
+          Copy-Item -LiteralPath 'work\frozen-checkout\payload_ui.big' -Destination 'work\frozen\payload_ui.big' -Force
+          Copy-Item -LiteralPath 'work\frozen-checkout\payload_paper.inc' -Destination 'work\frozen\payload_paper.inc' -Force
 
           function Hash([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant() }
           function Inflate([string]$B64,[string]$Out) {
