@@ -1,0 +1,70 @@
+name: Publish Launcher 1.1 Release Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-v1.1-release-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify frozen launcher 1.1 release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_COMMIT="bbd7eff483d2cdbf3e799f764433b49195dc55b6"
+          git cat-file -e "${RELEASE_COMMIT}^{commit}"
+          echo "Frozen launcher 1.1 release commit: ${RELEASE_COMMIT}"
+
+      - name: Create v1.1 tag if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_COMMIT="bbd7eff483d2cdbf3e799f764433b49195dc55b6"
+          if git ls-remote --exit-code --tags origin "refs/tags/v1.1" >/dev/null 2>&1; then
+            echo "v1.1 already exists; leaving it untouched."
+          else
+            git tag v1.1 "${RELEASE_COMMIT}"
+            git push origin refs/tags/v1.1
+          fi
+
+      - name: Create GitHub Release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release v1.1 already exists; leaving it untouched."
+            exit 0
+          fi
+
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          # AotR 8P WotR Launcher 1.1
+
+          Frozen production release reference:
+
+          - Release commit: `bbd7eff483d2cdbf3e799f764433b49195dc55b6`
+          - Launcher EXE SHA256: `9F2D79FC951082158D7E712E3DDDDE3A050A69CDA4A372CBF43039CB379942E4`
+          - UI SHA256: `827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376`
+          - Paper SHA256: `3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43`
+          - Canonical builder: `launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V18_FINAL_1_1.ps1`
+
+          Release Consistency CI passed for launcher 1.1. The exact final production EXE also passed the recorded Stage 11 five-file promotion gate with isolated Config V2 and launcher-level GUI/config validation. Historical 1.0.10 and V17/1.0.9 material remains retained as rollback/research evidence.
+          EOF
+
+          gh release create v1.1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Launcher 1.1" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
