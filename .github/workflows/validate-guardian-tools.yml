@@ -2,9 +2,6 @@ name: Validate Guardian Tools
 
 on:
   pull_request:
-    paths:
-      - "tools/guardian/**"
-      - ".github/workflows/validate-guardian-tools.yml"
   push:
     branches:
       - main
