@@ -1,0 +1,100 @@
+name: Apply Issue 39 Fix and Build RC2 Final Once
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/fix-issue39-http-output-build-final-once.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-build:
+    name: apply-issue39-fix-build-rc2
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/launcher-1.1.2-clean-architecture
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Apply confirmed HTTP output fix and deterministic hash gates
+        shell: python
+        run: |
+          from pathlib import Path
+          NEW_GUI_HASH = '4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC'
+          OLD_GUI_HASH = '74A57F88A4BFF3C2E02B4C158DD3EC42173A623A27813E59815C352C4F566C7D'
+
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          old_call = '        $response.EnsureSuccessStatusCode()\n'
+          new_call = '        [void]$response.EnsureSuccessStatusCode()\n'
+          if text.count(old_call) != 2:
+              raise SystemExit(f'Expected 2 unsuppressed HTTP status calls, found {text.count(old_call)}')
+          text = text.replace(old_call, new_call)
+          old_hash_line = f'EXPECTED_GUI_OUT = "{OLD_GUI_HASH}"'
+          new_hash_line = f'EXPECTED_GUI_OUT = "{NEW_GUI_HASH}"'
+          if text.count(old_hash_line) != 1:
+              raise SystemExit('Transformer GUI hash anchor missing or non-unique')
+          text = text.replace(old_hash_line, new_hash_line, 1)
+          if text.count('[void]$response.EnsureSuccessStatusCode()') != 2:
+              raise SystemExit('HTTP output suppression count mismatch after patch')
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          old_gate = f'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "{OLD_GUI_HASH}" "Clean GUI"'
+          new_gate = f'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "{NEW_GUI_HASH}" "Clean GUI"'
+          if bt.count(old_gate) != 1:
+              raise SystemExit('Build GUI hash gate missing or non-unique')
+          b.write_text(bt.replace(old_gate, new_gate, 1), encoding='utf-8', newline='\n')
+
+      - name: Commit issue 39 runtime fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: keep HttpClient helpers output-silent"
+          git push origin HEAD:feature/launcher-1.1.2-clean-architecture
+
+      - name: Build and Defender-scan 1.1.2 RC2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $FinalStableV7Base64 = '$FinalStableV7Base64'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_V19_1_1_2_RC2 `
+            -LauncherVersion 1.1.2
+          $gui='.\_V19_1_1_2_RC2\work\resources\launcher_gui.ps1'
+          $guiHash=(Get-FileHash -LiteralPath $gui -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($guiHash -ne '4F0A115B49B553CF3C2F28C7F3AD8500E46EE169136C150BE8621DCACCB644EC'){throw "RC2 GUI hash mismatch: $guiHash"}
+          $txt=Get-Content -LiteralPath $gui -Raw -Encoding UTF8
+          if(([regex]::Matches($txt,'\[void\]\$response\.EnsureSuccessStatusCode\(\)')).Count -ne 2){throw 'Issue #39 suppression missing from RC2 GUI'}
+          if($txt -match '(?m)^\s*\$response\.EnsureSuccessStatusCode\(\)\s*$'){throw 'Unsuppressed status response remains'}
+          Write-Host 'ISSUE39_HTTP_OUTPUT_REGRESSION_GATE=PASS'
+
+      - name: Upload fixed RC2
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-RC2-Issue39-Fixed-Final
+          path: |
+            _V19_1_1_2_RC2/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _V19_1_1_2_RC2/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _V19_1_1_2_RC2/SHA256SUMS.json
+            _V19_1_1_2_RC2/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
