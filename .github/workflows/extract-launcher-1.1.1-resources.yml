@@ -1,0 +1,89 @@
+name: Extract Launcher 1.1.1 Resources
+
+on:
+  push:
+    branches:
+      - feature/launcher-1.1.2-clean-architecture
+    paths:
+      - ".github/workflows/extract-launcher-1.1.1-resources.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          fetch-depth: 1
+
+      - name: Verify frozen donor EXE
+        shell: powershell
+        run: |
+          $expected = '2141EA9690708EA7A61B7298AD90E0C76CC417FED996AC0CF3685276BA2A4024'
+          $actual = (Get-FileHash -LiteralPath 'AotR 8P WotR Mod.exe' -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $expected) { throw "Donor EXE mismatch: $actual" }
+          Write-Host "DONOR OK: $actual"
+
+      - name: Extract embedded scripts, skin and icon
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.Drawing
+
+          $exe = (Resolve-Path 'AotR 8P WotR Mod.exe').Path
+          $asm = [Reflection.Assembly]::LoadFile($exe)
+          $type = $asm.GetType('Program', $true)
+          $flags = [Reflection.BindingFlags]'NonPublic,Public,Static'
+
+          function Get-ConstString([string]$name) {
+              $field = $type.GetField($name, $flags)
+              if (-not $field) { throw "Missing const field: $name" }
+              $value = $field.GetRawConstantValue()
+              if (-not ($value -is [string])) { throw "Field $name is not a string constant" }
+              return [string]$value
+          }
+
+          function Inflate-Base64Gzip([string]$value, [string]$outPath) {
+              $packed = [Convert]::FromBase64String($value)
+              $input = New-Object IO.MemoryStream(,$packed)
+              try {
+                  $gzip = New-Object IO.Compression.GZipStream($input, [IO.Compression.CompressionMode]::Decompress)
+                  try {
+                      $output = [IO.File]::Create($outPath)
+                      try { $gzip.CopyTo($output) } finally { $output.Dispose() }
+                  } finally { $gzip.Dispose() }
+              } finally { $input.Dispose() }
+          }
+
+          New-Item -ItemType Directory -Force -Path extracted | Out-Null
+
+          Inflate-Base64Gzip (Get-ConstString 'Issue33SkinGzipBase64') 'extracted\launcher_skin.png'
+          Inflate-Base64Gzip (Get-ConstString 'GuiGzipBase64') 'extracted\launcher_gui.ps1'
+          Inflate-Base64Gzip (Get-ConstString 'EngineGzipBase64') 'extracted\launcher_engine.ps1'
+
+          $icon = [Drawing.Icon]::ExtractAssociatedIcon($exe)
+          if (-not $icon) { throw 'Could not extract launcher icon' }
+          $fs = [IO.File]::Create('extracted\launcher.ico')
+          try { $icon.Save($fs) } finally { $fs.Dispose(); $icon.Dispose() }
+
+          $skinHash = (Get-FileHash 'extracted\launcher_skin.png' -Algorithm SHA256).Hash.ToUpperInvariant()
+          $guiHash = (Get-FileHash 'extracted\launcher_gui.ps1' -Algorithm SHA256).Hash.ToUpperInvariant()
+          $engineHash = (Get-FileHash 'extracted\launcher_engine.ps1' -Algorithm SHA256).Hash.ToUpperInvariant()
+          Write-Host "SKIN=$skinHash"
+          Write-Host "GUI=$guiHash"
+          Write-Host "ENGINE=$engineHash"
+
+          if ($skinHash -ne 'BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6') { throw 'Skin hash mismatch' }
+          if ($guiHash -ne '23880AF22E3D0121EE79FE14CAA21799BFBE105397E4C66DC21E641D50DAD09C') { throw 'GUI hash mismatch' }
+          if ($engineHash -ne '94A71026D6A35998D0338DA0FDF9D478DDD92A76C382F23E109B13286F3F5AAA') { throw 'ENGINE hash mismatch' }
+
+      - name: Upload extracted frozen resources
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-1.1.1-frozen-resources
+          path: extracted/**
+          retention-days: 1
