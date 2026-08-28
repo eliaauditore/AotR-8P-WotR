@@ -15,53 +15,43 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Reproduce exact embedded unread flow with issue 78
+      - name: Inspect PowerShell 5.1 comment JSON shape
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           Add-Type -AssemblyName System.Net.Http
-          $exe=(Resolve-Path '.\AotR 8P WotR Mod.exe').Path
-          $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
-          $s=$asm.GetManifestResourceStream('AotR8P.GuiScript')
-          if(-not $s){throw 'GUI resource missing'}
-          $gui=Join-Path $env:RUNNER_TEMP 'launcher_gui_115.ps1'
-          try{$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
-
-          $tokens=$null;$errors=$null
-          $ast=[System.Management.Automation.Language.Parser]::ParseFile($gui,[ref]$tokens,[ref]$errors)
-          if($errors.Count){throw $errors[0].Message}
-          $wanted=@{}
-          foreach($n in @('Get-HttpText','Load-SupportState','Save-SupportState','Resolve-MasterIssue','Get-MaintainerMessages','Refresh-SupportMessages')){$wanted[$n]=$true}
-          $funcs=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted.ContainsKey($node.Name)},$true))
-          if($funcs.Count -ne 6){throw "function extraction mismatch: $($funcs.Count)"}
-          $fn=Join-Path $env:RUNNER_TEMP 'messages-live-functions.ps1'
-          [IO.File]::WriteAllText($fn,(($funcs|ForEach-Object{$_.Extent.Text})-join "`r`n`r`n"),(New-Object Text.UTF8Encoding($false)))
-          . $fn
-
-          function Set-MessagesIndicator {}
-          function Write-RepairLog([string]$Text){Write-Host "REPAIRLOG: $Text"}
-          $script:HttpClient=New-Object System.Net.Http.HttpClient
-          $script:HttpClient.Timeout=[TimeSpan]::FromSeconds(30)
-          $script:HttpClient.DefaultRequestHeaders.UserAgent.ParseAdd('AotR-8P-WotR-Launcher/1.1.5-CI')
-          $script:HttpClient.DefaultRequestHeaders.Accept.ParseAdd('application/vnd.github+json')
-          $GitHubApiRoot='https://api.github.com/repos/eliaauditore/AotR-8P-WotR'
-          $SupportStatePath=Join-Path $env:RUNNER_TEMP 'support_state_78.json'
-          $seed=[ordered]@{schema=1;fingerprint='A8P-FP-53730198C7CD';master_issue=0;last_seen_message_id=0;latest_message_id=0;last_checked=''}
-          [IO.File]::WriteAllText($SupportStatePath,($seed|ConvertTo-Json -Depth 4),(New-Object Text.UTF8Encoding($false)))
-          $script:SupportState=$null
-
-          $script:SupportState=Load-SupportState
-          $messages=@(Refresh-SupportMessages)
-          $master=[int]$script:SupportState['master_issue']
-          $latest=[Int64]$script:SupportState['latest_message_id']
-          $seen=[Int64]$script:SupportState['last_seen_message_id']
-          Write-Host "MASTER=$master"
-          Write-Host "MESSAGE_COUNT=$($messages.Count)"
-          Write-Host "LATEST=$latest"
-          Write-Host "SEEN=$seen"
-          if($master -ne 78){throw "expected master 78, got $master"}
-          if($messages.Count -lt 1){throw 'expected maintainer messages'}
-          if($latest -lt 5450084118){throw "expected latest >= 5450084118, got $latest"}
-          if($seen -ne 0){throw "startup incorrectly marked read: $seen"}
-          if($latest -le $seen){throw 'unread invariant failed'}
-          Write-Host 'MESSAGES_1_1_5_SEEDED_UNREAD_E2E=PASS'
+          $client=New-Object System.Net.Http.HttpClient
+          $client.Timeout=[TimeSpan]::FromSeconds(30)
+          $client.DefaultRequestHeaders.UserAgent.ParseAdd('AotR-8P-WotR-Launcher/1.1.5-CI')
+          $client.DefaultRequestHeaders.Accept.ParseAdd('application/vnd.github+json')
+          $r=$client.GetAsync('https://api.github.com/repos/eliaauditore/AotR-8P-WotR/issues/78/comments?per_page=100').GetAwaiter().GetResult()
+          [void]$r.EnsureSuccessStatusCode()
+          $raw=$r.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+          $parsed=$raw | ConvertFrom-Json
+          Write-Host "PARSED_TYPE=$($parsed.GetType().FullName)"
+          Write-Host "PARSED_AT_COUNT=$(@($parsed).Count)"
+          $idx=0
+          foreach($x in @($parsed)){
+            Write-Host "ITEM[$idx]_TYPE=$($x.GetType().FullName)"
+            Write-Host "ITEM[$idx]_ID=$([string]$x.id)"
+            Write-Host "ITEM[$idx]_ASSOC=$([string]$x.author_association)"
+            Write-Host "ITEM[$idx]_USER=$([string]$x.user.login)"
+            $idx++
+          }
+          $allowed=@('OWNER','MEMBER','COLLABORATOR')
+          $legacy=@($parsed | Where-Object {
+            $body=[string]$_.body
+            ($allowed -contains [string]$_.author_association) -and
+            -not $body.Contains('<!-- no-broadcast -->') -and
+            -not $body.TrimStart().StartsWith('[internal]',[StringComparison]::OrdinalIgnoreCase)
+          } | Sort-Object id)
+          Write-Host "LEGACY_FILTER_COUNT=$($legacy.Count)"
+          $flat=@(@($parsed) | ForEach-Object { $_ } | Where-Object {
+            $body=[string]$_.body
+            ($allowed -contains [string]$_.author_association) -and
+            -not $body.Contains('<!-- no-broadcast -->') -and
+            -not $body.TrimStart().StartsWith('[internal]',[StringComparison]::OrdinalIgnoreCase)
+          } | Sort-Object id)
+          Write-Host "FLAT_FILTER_COUNT=$($flat.Count)"
+          foreach($x in $flat){Write-Host "FLAT_ID=$($x.id) ASSOC=$($x.author_association)"}
+          $r.Dispose();$client.Dispose()
