@@ -6,17 +6,20 @@ param(
     [int]$ObserveSeconds = 8,
     [int]$WatcherTimeoutSeconds = 20,
     [int]$ArmTimeoutSeconds = 10,
+    [int]$GameWaitSeconds = 180,
     [string]$ResearchRoot = 'C:\AOTR_RESEARCH'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ONE-COMMAND ORCHESTRATOR V2.
+# ONE-COMMAND ORCHESTRATOR V2.1.
 # No manual timing and no second console.
 # V2 uses a sidecar readiness file written by the debugger itself immediately after
 # DR0/DR1 are armed. It does NOT wait for redirected stdout from Watch(), because
 # that stdout is only emitted after the C# Watch() method returns.
+# V2.1 additionally waits for exactly one matching game.dat process instead of
+# failing immediately when AotR is not running yet.
 
 if ([string]::IsNullOrWhiteSpace($RepoRef)) {
     throw 'Pass -RepoRef with the exact Git commit SHA supplied for this test.'
@@ -25,22 +28,42 @@ if ($ExpectedRemotePort -lt 1 -or $ExpectedRemotePort -gt 65535) { throw 'Expect
 if ($ObserveSeconds -lt 1 -or $ObserveSeconds -gt 60) { throw 'ObserveSeconds must be 1..60.' }
 if ($WatcherTimeoutSeconds -lt 10 -or $WatcherTimeoutSeconds -gt 120) { throw 'WatcherTimeoutSeconds must be 10..120.' }
 if ($ArmTimeoutSeconds -lt 2 -or $ArmTimeoutSeconds -gt 30) { throw 'ArmTimeoutSeconds must be 2..30.' }
+if ($GameWaitSeconds -lt 1 -or $GameWaitSeconds -gt 900) { throw 'GameWaitSeconds must be 1..900.' }
 
 New-Item -ItemType Directory -Path $ResearchRoot -Force | Out-Null
 
 $ExpectedHash = 'CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC'
-if (-not (Test-Path -LiteralPath $GameDat)) { throw "game.dat not found: $GameDat" }
+if (-not (Test-Path -LiteralPath $GameDat)) { throw "game.dat not found on disk: $GameDat" }
 $hash = (Get-FileHash -LiteralPath $GameDat -Algorithm SHA256).Hash.ToUpperInvariant()
 if ($hash -ne $ExpectedHash) { throw "HASH MISMATCH. Expected $ExpectedHash, got $hash" }
 
 $ps32 = Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $ps32)) { throw "32-bit Windows PowerShell not found: $ps32" }
 
-$games = @(Get-CimInstance Win32_Process | Where-Object {
-    $_.Name -ieq 'game.dat' -and $_.ExecutablePath -eq $GameDat
-})
-if ($games.Count -ne 1) { throw "Expected exactly one game.dat at '$GameDat', found $($games.Count)." }
+function Get-MatchingGameProcess {
+    return @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -ieq 'game.dat' -and $_.ExecutablePath -eq $GameDat
+    })
+}
+
+$games = @(Get-MatchingGameProcess)
+if ($games.Count -eq 0) {
+    Write-Host 'WAITING_FOR_GAME: start AotR on the VM and enter the normal game browser.' -ForegroundColor Yellow
+    Write-Host 'The orchestrator will continue automatically when exactly one matching game.dat is running.'
+    $gameDeadline = [DateTime]::UtcNow.AddSeconds($GameWaitSeconds)
+    do {
+        Start-Sleep -Milliseconds 500
+        $games = @(Get-MatchingGameProcess)
+        if ($games.Count -gt 1) {
+            throw "More than one matching game.dat appeared at '$GameDat' (count=$($games.Count)). Close duplicate instances."
+        }
+    } while ($games.Count -eq 0 -and [DateTime]::UtcNow -lt $gameDeadline)
+}
+if ($games.Count -ne 1) {
+    throw "No matching game.dat appeared at '$GameDat' before the preflight window ended."
+}
 $pid32 = [int]$games[0].ProcessId
+Write-Host ("GAME_FOUND PID={0}" -f $pid32) -ForegroundColor Green
 
 $baseRaw = 'https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/' + $RepoRef + '/tools/research/'
 $watchPath   = Join-Path $ResearchRoot 'AOTR_WOTR_STATE8_COMPLETION_DUAL_EXEC_WATCH_V2.ps1'
@@ -85,7 +108,7 @@ function Stop-ChildSafe($proc) {
 }
 
 Write-Host '============================================================'
-Write-Host ' AOTR WOTR LOWLEVEL JOIN COMPLETION ORCHESTRATOR V2'
+Write-Host ' AOTR WOTR LOWLEVEL JOIN COMPLETION ORCHESTRATOR V2.1'
 Write-Host '============================================================'
 Write-Host ("Repo ref       : {0}" -f $RepoRef)
 Write-Host ("Game PID       : {0}" -f $pid32)
@@ -177,7 +200,7 @@ try {
 
     $lines = New-Object 'System.Collections.Generic.List[string]'
     $lines.Add('============================================================')
-    $lines.Add(' AOTR WOTR LOWLEVEL JOIN COMPLETION - COMBINED RESULT V2')
+    $lines.Add(' AOTR WOTR LOWLEVEL JOIN COMPLETION - COMBINED RESULT V2.1')
     $lines.Add('============================================================')
     $lines.Add(("Timestamp               : {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')))
     $lines.Add(("RepoRef                 : {0}" -f $RepoRef))
