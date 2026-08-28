@@ -39,9 +39,10 @@ $oldStatic = 'Write-Host "ISSUE78 STATIC CONTRACT PASS" -ForegroundColor Green'
 $newStatic = @'
 Write-Host "ISSUE78 STATIC CONTRACT PASS" -ForegroundColor Green
 if ($guiText -notmatch 'Remove-AotR8PLegacyRuntimeFolders') { throw "Issue84 cleanup helper missing" }
-if ($guiText -notmatch 'legacyExternalOnly') { throw "Issue84 non-NTFS guard missing" }
-if ($guiText -notmatch 'Issue84 removed stale non-NTFS runtime folder') { throw "Issue84 cleanup logging marker missing" }
-if ($guiText -notmatch [regex]::Escape('$DriveFormat -ieq "NTFS"')) { throw "Issue84 NTFS no-delete guard missing" }
+if ($guiText -notmatch 'destructiveLegacyCleanup') { throw "Issue84 destructive-cleanup guard missing" }
+if ($guiText -notmatch 'safeLegacyFormats') { throw "Issue84 safe filesystem allowlist missing" }
+if ($guiText -notmatch 'Issue84 removed stale exFAT/FAT runtime folder') { throw "Issue84 cleanup logging marker missing" }
+if ($guiText -notmatch '"exFAT", "FAT32", "FAT"') { throw "Issue84 exFAT/FAT allowlist contract missing" }
 Write-Host "ISSUE84 STATIC CONTRACT PASS" -ForegroundColor Green
 '@
 $text = Replace-Once $text $oldStatic $newStatic 'Issue84 static contract insertion'
