@@ -1,4 +1,5 @@
 name: Promote 1.1.5 Messages Once
+# retry: byte-preserving GUI transform
 
 on:
   push:
@@ -35,7 +36,6 @@ jobs:
           $repair=Get-Content (Join-Path $package 'repair-manifest.json') -Raw | ConvertFrom-Json
           if($repair.generated_for_launcher -ne '1.1.5'){throw 'repair manifest version mismatch'}
 
-          # Verify exact embedded GUI contains the fixed public GitHub query.
           $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
           $s=$asm.GetManifestResourceStream('AotR8P.GuiScript')
           if(-not $s){throw 'GUI resource missing'}
@@ -47,7 +47,6 @@ jobs:
           if($guiText.IndexOf($fixed,[StringComparison]::Ordinal) -lt 0){throw 'fixed is:issue master query missing'}
           if($guiText.IndexOf($broken,[StringComparison]::Ordinal) -ge 0){throw 'broken legacy master query still present'}
 
-          # Exact public unauthenticated query used by the launcher must resolve #78.
           $fp='A8P-FP-53730198C7CD'
           $query=[Uri]::EscapeDataString('repo:eliaauditore/AotR-8P-WotR is:issue label:master-ticket "'+$fp+'"')
           $headers=@{'User-Agent'='AotR-8P-WotR-Launcher-CI';'Accept'='application/vnd.github+json'}
@@ -71,8 +70,7 @@ jobs:
             '- Verified public maintainer message: comment `5449463070` is broadcast-visible.',
             '- Launcher SHA256: `'+$exeHash+'`',
             '- Launcher size: `'+$size+'` bytes',
-            '- Defender: `SCANNED_CLEAN`',
-            '',
+            '- Defender: `SCANNED_CLEAN`','',
             'The promoted public EXE is the exact binary that passed the public GitHub master/message lookup gate in this job.'
           ) -join [Environment]::NewLine
           [IO.File]::WriteAllText('docs/RELEASE_CHECKPOINT_1.1.5.md',$checkpoint+[Environment]::NewLine,(New-Object Text.UTF8Encoding($false)))
