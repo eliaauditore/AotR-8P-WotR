@@ -48,7 +48,7 @@ public static class AotrDualExec32V4 {
     const uint EX=1, CT=2, CP=3, XP=5;
     const uint SS=0x80000004, BP=0x80000003, CONT=0x00010002, NA=0x80010001;
     const uint TS=0x2, TG=0x8, TSET=0x10, TQ=0x40, TA=TS|TG|TSET|TQ;
-    const uint PA=0x0002|0x0008|0x0010|0x0020|0x0400;
+    const uint PROCESS_ALL_ACCESS=0x001F0FFF;
     const uint CI=0x10000, CD=CI|0x10, CINT=CI|0x2, CC=CI|0x1, CAP=CD|CINT|CC;
     const uint SG=0x00DE4394, NG=0x00DE892C, UI=0x00DEA114, C54=0x00C54B78;
 
@@ -84,7 +84,7 @@ public static class AotrDualExec32V4 {
     static bool Exists(string p){ if(String.IsNullOrEmpty(p))return false; try{return File.Exists(p);}catch{return false;} }
 
     public static string Watch(int pid,uint cb,uint comp,int timeoutMs,string readyFile,string stopFile,string statusFile){
-        StringBuilder l=new StringBuilder(); IntPtr ph=OpenProcess(PA,false,(uint)pid); if(ph==IntPtr.Zero)throw new Exception("OpenProcess failed "+Marshal.GetLastWin32Error());
+        StringBuilder l=new StringBuilder(); IntPtr ph=OpenProcess(PROCESS_ALL_ACCESS,false,(uint)pid); if(ph==IntPtr.Zero)throw new Exception("OpenProcess(PROCESS_ALL_ACCESS) failed "+Marshal.GetLastWin32Error());
         bool attached=false,pending=false,armed=false,stopRequested=false,done=false; DE e=new DE(); Stopwatch sw=Stopwatch.StartNew(); int cbHits=0,compHits=0;
         try{
             Signal(statusFile,"STAGE=ATTACHING\r\n"); DebugSetProcessKillOnExit(false);
