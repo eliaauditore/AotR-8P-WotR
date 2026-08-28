@@ -1,8 +1,8 @@
 {
     "schema":  1,
-    "launcher_version":  "1.1.4",
+    "launcher_version":  "1.1.5",
     "launcher_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/AotR%208P%20WotR%20Mod.exe",
-    "launcher_sha256":  "4421AD355F99C34CF530F3F1B32C63C73BD28190B8C13652989EB197BC8A1C42",
+    "launcher_sha256":  "FF5F907E2D8B2D87A410899ABE9A4512EAB419FF1D48327900932D6F97A85459",
     "mandatory":  false,
     "repair_manifest_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/repair-manifest.json",
     "ui_url":  "https://raw.githubusercontent.com/eliaauditore/AotR-8P-WotR/main/payload_ui.big",
