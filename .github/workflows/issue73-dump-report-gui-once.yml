@@ -1,0 +1,62 @@
+name: Issue73 Dump Report GUI Once
+
+on:
+  push:
+    branches:
+      - feature/accountless-direct-report
+    paths:
+      - ".github/workflows/issue73-dump-report-gui-once.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/accountless-direct-report
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Build current transformed resources
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_ISSUE73_INSPECT `
+            -LauncherVersion 1.1.2
+
+      - name: Print REPORT ERROR source anchors
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='.\_ISSUE73_INSPECT\work\resources\launcher_gui.ps1'
+          $lines=Get-Content -LiteralPath $p -Encoding UTF8
+          $patterns=@('REPORT ERROR','ReportHit','ReportText','support_bundle','GitHubIssue','New-Issue','Start-Process','clipboard','SetText','ReportReady','Build-Support','SupportBundle')
+          $hits=@()
+          for($i=0;$i -lt $lines.Count;$i++){
+            foreach($pat in $patterns){
+              if($lines[$i] -match [regex]::Escape($pat)){$hits += $i; break}
+            }
+          }
+          $ranges=@()
+          foreach($i in ($hits | Sort-Object -Unique)){
+            $s=[Math]::Max(0,$i-8); $e=[Math]::Min($lines.Count-1,$i+14)
+            $ranges += ,@($s,$e)
+          }
+          foreach($r in $ranges){
+            Write-Host ('===== LINES {0}-{1} =====' -f ($r[0]+1),($r[1]+1))
+            for($j=$r[0];$j -le $r[1];$j++){
+              Write-Host ('{0:D5}: {1}' -f ($j+1),$lines[$j])
+            }
+          }
