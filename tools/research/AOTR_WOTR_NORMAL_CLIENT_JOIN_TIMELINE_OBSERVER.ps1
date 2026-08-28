@@ -13,6 +13,10 @@ $ErrorActionPreference = 'Stop'
 # in the session/current/NetworkGI globals. This does not patch game memory and does
 # not call any game function. Intended control experiment after the PlayerTemplate
 # mismatch was fixed.
+#
+# Windows PowerShell 5.1 compatibility note:
+# UIntPtr construction for ReadProcessMemory is kept entirely inside the C# wrapper.
+# PowerShell itself only calls TryReadUInt32(), avoiding the PS5.1 UIntPtr cast issue.
 
 $ExpectedHash = 'CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC'
 if (-not (Test-Path -LiteralPath $GameDat)) { throw "game.dat not found: $GameDat" }
@@ -21,21 +25,45 @@ if ($hash -ne $ExpectedHash) { throw "HASH MISMATCH. Expected $ExpectedHash, got
 if ($DurationSeconds -lt 1) { throw 'DurationSeconds must be >= 1.' }
 if ($IntervalMs -lt 5) { throw 'IntervalMs must be >= 5.' }
 
-if (-not ('AotrReadOnlyNative' -as [type])) {
+if (-not ('AotrReadOnlyNativeV2' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public static class AotrReadOnlyNative {
+public static class AotrReadOnlyNativeV2 {
     [DllImport("kernel32.dll", SetLastError=true)]
     public static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
 
     [DllImport("kernel32.dll", SetLastError=true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr address, byte[] buffer, UIntPtr size, out UIntPtr bytesRead);
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess,
+        IntPtr address,
+        byte[] buffer,
+        UIntPtr size,
+        out UIntPtr bytesRead);
 
     [DllImport("kernel32.dll", SetLastError=true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CloseHandle(IntPtr handle);
+
+    public static bool TryReadUInt32(IntPtr hProcess, long address, out uint value) {
+        byte[] buffer = new byte[4];
+        UIntPtr bytesRead;
+        bool ok = ReadProcessMemory(
+            hProcess,
+            new IntPtr(address),
+            buffer,
+            new UIntPtr(4u),
+            out bytesRead);
+
+        if (!ok || bytesRead.ToUInt64() != 4UL) {
+            value = 0u;
+            return false;
+        }
+
+        value = BitConverter.ToUInt32(buffer, 0);
+        return true;
+    }
 }
 '@
 }
@@ -58,15 +86,14 @@ if ($proc.ExecutablePath -ne $GameDat) {
 
 $PROCESS_VM_READ = 0x0010
 $PROCESS_QUERY_INFORMATION = 0x0400
-$h = [AotrReadOnlyNative]::OpenProcess(($PROCESS_VM_READ -bor $PROCESS_QUERY_INFORMATION), $false, $ProcessId)
+$h = [AotrReadOnlyNativeV2]::OpenProcess(($PROCESS_VM_READ -bor $PROCESS_QUERY_INFORMATION), $false, $ProcessId)
 if ($h -eq [IntPtr]::Zero) { throw "OpenProcess failed. Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
 
 function Read-U32([uint32]$Address) {
-    $buf = New-Object byte[] 4
-    $got = [UIntPtr]::Zero
-    $ok = [AotrReadOnlyNative]::ReadProcessMemory($h, [IntPtr]([int64]$Address), $buf, [UIntPtr]4, [ref]$got)
-    if (-not $ok -or $got.ToUInt64() -ne 4) { return [uint32]0 }
-    return [BitConverter]::ToUInt32($buf, 0)
+    [uint32]$value = 0
+    $ok = [AotrReadOnlyNativeV2]::TryReadUInt32($h, [int64][uint64]$Address, [ref]$value)
+    if (-not $ok) { return [uint32]0 }
+    return $value
 }
 
 function Read-VTable([uint32]$Ptr) {
@@ -173,5 +200,5 @@ try {
     Write-Output 'READ-ONLY COMPLETE. No file or process memory was modified.'
 }
 finally {
-    if ($h -ne [IntPtr]::Zero) { [void][AotrReadOnlyNative]::CloseHandle($h) }
+    if ($h -ne [IntPtr]::Zero) { [void][AotrReadOnlyNativeV2]::CloseHandle($h) }
 }
