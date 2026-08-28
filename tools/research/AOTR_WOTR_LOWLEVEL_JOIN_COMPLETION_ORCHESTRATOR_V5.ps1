@@ -75,7 +75,7 @@ Write-Host ("SHA256         : {0}" -f $hash)
 Write-Host ("Expected host  : {0}:{1}" -f $ExpectedRemoteIp,$ExpectedRemotePort)
 Write-Host ''
 
-Write-Host 'PHASE 0/4 TOOLING SELFTEST - validating hidden 32-bit PowerShell child launch...'
+Write-Host 'PHASE 0/5 TOOLING SELFTEST - validating hidden 32-bit PowerShell child launch...'
 $selfStamp=Get-Date -Format 'yyyyMMdd_HHmmss_fff'
 $selfOut=Join-Path $ResearchRoot "ORCH_SELFTEST_$selfStamp.out.txt"
 $selfErr=Join-Path $ResearchRoot "ORCH_SELFTEST_$selfStamp.err.txt"
@@ -118,6 +118,26 @@ Download-Tool -Name 'AOTR_WOTR_NATIVE_JOIN_CALL_POC.ps1' -Destination $joinPath
 Download-Tool -Name 'AOTR_WOTR_NATIVE_JOIN_CALL_POC_PS51_WRAPPER.ps1' -Destination $wrapperPath
 Write-Host 'DOWNLOADED_TOOLS_SYNTAX_PASS' -ForegroundColor Green
 
+Write-Host 'PHASE 1/5 CLR SELFTEST - loading watcher C# and validating x86 DEBUG_EVENT layout...'
+$clrStamp=Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+$clrOut=Join-Path $ResearchRoot "WATCHER_CLR_SELFTEST_$clrStamp.out.txt"
+$clrErr=Join-Path $ResearchRoot "WATCHER_CLR_SELFTEST_$clrStamp.err.txt"
+Remove-Item -LiteralPath $clrOut,$clrErr -Force -ErrorAction SilentlyContinue
+$clrArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-Arg $watchPath),'-CompileOnly')
+$clrProc=Start-Ps32Hidden -ChildArguments $clrArgs -StdOutPath $clrOut -StdErrPath $clrErr
+if(-not $clrProc.WaitForExit(15000)){
+    Stop-ProcSafe -ProcessObject $clrProc
+    throw 'WATCHER_CLR_SELFTEST_TIMEOUT. No debugger or join was started.'
+}
+$clrText=Read-TextSafe -FilePath $clrOut
+$clrErrText=Read-TextSafe -FilePath $clrErr
+$clrExpected='CLR_LAYOUT_SELFTEST_PASS DEBUG_EVENT_SIZE=96 HTHREAD_OFFSET=12 EXADDR_OFFSET=24'
+if($clrText -notmatch [regex]::Escape($clrExpected) -or $clrText -notmatch 'COMPILE_ONLY_COMPLETE'){
+    throw ("WATCHER_CLR_SELFTEST_FAILED - no debugger/join executed.`n--- OUT ---`n{0}`n--- ERR ---`n{1}" -f $clrText,$clrErrText)
+}
+Write-Host $clrExpected -ForegroundColor Green
+Write-Host 'WATCHER_CLR_SELFTEST_PASS' -ForegroundColor Green
+
 $stamp=Get-Date -Format 'yyyyMMdd_HHmmss'
 $preOut=Join-Path $ResearchRoot "PREFLIGHT_$stamp.out.txt"; $preErr=Join-Path $ResearchRoot "PREFLIGHT_$stamp.err.txt"
 $readyFile=Join-Path $ResearchRoot "STATE8_READY_$stamp.txt"; $stopFile=Join-Path $ResearchRoot "STATE8_STOP_$stamp.txt"; $statusFile=Join-Path $ResearchRoot "STATE8_STATUS_$stamp.txt"
@@ -126,7 +146,7 @@ $joinOut=Join-Path $ResearchRoot "LOWLEVEL_JOIN_$stamp.out.txt"; $joinErr=Join-P
 $combined=Join-Path $ResearchRoot "LOWLEVEL_JOIN_COMPLETION_COMBINED_$stamp.txt"
 foreach($file in @($preOut,$preErr,$readyFile,$stopFile,$statusFile,$watchOut,$watchErr,$joinOut,$joinErr,$combined)){Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue}
 
-Write-Host 'PHASE 1/4 PREFLIGHT - validating pre-join contract...'
+Write-Host 'PHASE 2/5 PREFLIGHT - validating pre-join contract...'
 $preArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-Arg $wrapperPath),'-SourcePath',(Quote-Arg $joinPath),'-ProcessId',[string]$pid32,'-ExpectedRemoteIp',(Quote-Arg $ExpectedRemoteIp),'-ExpectedRemotePort',[string]$ExpectedRemotePort,'-ObserveSeconds',[string]$ObserveSeconds)
 $preProc=Start-Ps32Hidden -ChildArguments $preArgs -StdOutPath $preOut -StdErrPath $preErr
 if(-not $preProc.WaitForExit(15000)){Stop-ProcSafe -ProcessObject $preProc;throw 'PREFLIGHT_TIMEOUT. No debugger or join was started.'}
@@ -134,7 +154,7 @@ $preText=Read-TextSafe -FilePath $preOut; $preErrText=Read-TextSafe -FilePath $p
 if($preText -notmatch 'CALL_POC_READY = YES'){throw ("PREFLIGHT_FAILED - no debugger/join executed.`n--- OUT ---`n{0}`n--- ERR ---`n{1}" -f $preText,$preErrText)}
 Write-Host 'PREFLIGHT_PASS' -ForegroundColor Green
 
-Write-Host 'PHASE 2/4 WATCHER - attaching and arming hidden debugger...'
+Write-Host 'PHASE 3/5 WATCHER - attaching and arming hidden debugger...'
 $watchArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-Arg $watchPath),'-ProcessId',[string]$pid32,'-GameDat',(Quote-Arg $GameDat),'-TimeoutSeconds',[string]$WatcherTimeoutSeconds,'-ReadyFile',(Quote-Arg $readyFile),'-StopFile',(Quote-Arg $stopFile),'-StatusFile',(Quote-Arg $statusFile))
 $watchProc=Start-Ps32Hidden -ChildArguments $watchArgs -StdOutPath $watchOut -StdErrPath $watchErr
 Write-Host ("WATCHER_STARTED PID={0}" -f $watchProc.Id)
@@ -152,7 +172,7 @@ if($armedCount -le 0){
 }
 Write-Host ("WATCHER_READY ARMED_THREADS={0}" -f $armedCount) -ForegroundColor Green
 
-Write-Host 'PHASE 3/4 JOIN - executing one native +0x40 call...'
+Write-Host 'PHASE 4/5 JOIN - executing one native +0x40 call...'
 $joinArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-Arg $wrapperPath),'-SourcePath',(Quote-Arg $joinPath),'-ProcessId',[string]$pid32,'-ExpectedRemoteIp',(Quote-Arg $ExpectedRemoteIp),'-ExpectedRemotePort',[string]$ExpectedRemotePort,'-ObserveSeconds',[string]$ObserveSeconds,'-Execute')
 $joinProc=Start-Ps32Hidden -ChildArguments $joinArgs -StdOutPath $joinOut -StdErrPath $joinErr
 Write-Host ("JOIN_STARTED PID={0}" -f $joinProc.Id)
@@ -163,7 +183,7 @@ if(-not $joinProc.WaitForExit(25000)){
 }
 Write-Host 'JOIN_PROCESS_EXITED=YES'
 
-Write-Host 'PHASE 4/4 TEARDOWN - requesting debugger disarm/detach...'
+Write-Host 'PHASE 5/5 TEARDOWN - requesting debugger disarm/detach...'
 Start-Sleep -Milliseconds 1000
 Set-Content -LiteralPath $stopFile -Value 'STOP=1' -Encoding ASCII
 Write-Host 'WATCHER_STOP_REQUESTED'
@@ -188,7 +208,7 @@ $valid=$joinReturned -and $joinObserved -and $currentC54 -and $de892cStayedNull 
 $lines=New-Object 'System.Collections.Generic.List[string]'
 $lines.Add('============================================================');$lines.Add(' AOTR WOTR LOWLEVEL JOIN COMPLETION - COMBINED RESULT V5');$lines.Add('============================================================')
 $lines.Add(("RepoRef                  : {0}" -f $RepoRef));$lines.Add(("Game PID                 : {0}" -f $pid32));$lines.Add(("ARMED_THREADS            : {0}" -f $armedCount));$lines.Add('')
-$lines.Add('================ VERDICT INPUTS ================');$lines.Add('TOOLING_SELFTEST_PASS     : YES');$lines.Add('PREFLIGHT_PASS            : YES')
+$lines.Add('================ VERDICT INPUTS ================');$lines.Add('TOOLING_SELFTEST_PASS     : YES');$lines.Add('WATCHER_CLR_SELFTEST_PASS : YES');$lines.Add('PREFLIGHT_PASS            : YES')
 $lines.Add(("JOIN_RETURNED             : {0}" -f $(if($joinReturned){'YES'}else{'NO'})));$lines.Add(("JOIN_STATE_OBSERVED       : {0}" -f $(if($joinObserved){'YES'}else{'NO'})));$lines.Add(("CURRENT_C54B78            : {0}" -f $(if($currentC54){'YES'}else{'NO'})));$lines.Add(("DE892C_STAYED_NULL        : {0}" -f $(if($de892cStayedNull){'YES'}else{'NO'})));$lines.Add(("WATCHER_CLEAN_EXIT        : {0}" -f $(if($watchDone){'YES'}else{'NO'})));$lines.Add(("TEST_VALID_FOR_STATE8     : {0}" -f $(if($valid){'YES'}else{'NO'})));$lines.Add(("CALLBACK_8496C2_HIT       : {0}" -f $callbackHit));$lines.Add(("COMPLETION_84944F_HIT     : {0}" -f $completionHit));$lines.Add('')
 $lines.Add('================ WATCHER STATUS ================');$lines.Add($statusText.TrimEnd());$lines.Add('');$lines.Add('================ JOIN STDOUT ================');$lines.Add($joinText.TrimEnd())
 if(-not [string]::IsNullOrWhiteSpace($joinErrText)){$lines.Add('');$lines.Add('================ JOIN STDERR ================');$lines.Add($joinErrText.TrimEnd())}
