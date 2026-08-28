@@ -1,6 +1,6 @@
 {
     "schema":  1,
-    "generated_for_launcher":  "1.1.3",
+    "generated_for_launcher":  "1.1.4",
     "plans":  {
                   "A8P-INSTALL-001":  {
                                           "actions":  [
@@ -73,6 +73,15 @@
                                                          "clear_compat_cache",
                                                          "retry_launch"
                                                      ]
-                                     }
+                                     },
+                  "A8P-RUNTIME-FS-001":  {
+                                             "actions":  [
+                                                             "stop_legacy_runtime",
+                                                             "stop_failed_game",
+                                                             "reset_runtime",
+                                                             "clear_compat_cache",
+                                                             "retry_launch"
+                                                         ]
+                                         }
               }
 }

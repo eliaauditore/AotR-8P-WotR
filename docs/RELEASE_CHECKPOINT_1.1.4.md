@@ -1,0 +1,18 @@
+# Release checkpoint â€” 1.1.4
+
+- Distribution: GitHub update channel only; no new ModDB package.
+- Issue: #78 external/exFAT runtime filesystem compatibility.
+- Launcher SHA256: `
+4421AD355F99C34CF530F3F1B32C63C73BD28190B8C13652989EB197BC8A1C42
+`
+- Launcher size: `
+1271296
+` bytes
+- Defender: `SCANNED_CLEAN`
+- Real exFAT virtual-disk gate: `PASS`
+- UI payload SHA256: `827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376`
+- Paper payload SHA256: `3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43`
+- FINAL_STABLE_V7 SHA256: `72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2`
+- V7 shellcode SHA256: `60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A`
+
+The promoted public EXE is the exact binary that passed the Defender and exFAT gates in this promotion job.
