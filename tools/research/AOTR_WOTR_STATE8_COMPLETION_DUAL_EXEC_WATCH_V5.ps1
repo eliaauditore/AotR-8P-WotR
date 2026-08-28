@@ -56,11 +56,20 @@ public static class AotrDualExec32V5 {
 
     [StructLayout(LayoutKind.Sequential)] public struct FSA { public uint a,b,c,d,e,f,g; [MarshalAs(UnmanagedType.ByValArray,SizeConst=80)] public byte[] r; public uint h; }
     [StructLayout(LayoutKind.Sequential)] public struct CTX { public uint Flags,Dr0,Dr1,Dr2,Dr3,Dr6,Dr7; public FSA fs; public uint Gs,Fs,Es,Ds,Edi,Esi,Ebx,Edx,Ecx,Eax,Ebp,Eip,Cs,EFlags,Esp,Ss; [MarshalAs(UnmanagedType.ByValArray,SizeConst=512)] public byte[] x; }
-    [StructLayout(LayoutKind.Sequential)] public struct ER { public uint Code,Flags,Rec,Addr,N; [MarshalAs(UnmanagedType.ByValArray,SizeConst=15)] public uint[] Info; }
-    [StructLayout(LayoutKind.Sequential)] public struct EI { public ER er; public uint first; }
-    [StructLayout(LayoutKind.Sequential)] public struct CTI { public IntPtr hThread; public IntPtr lpThreadLocalBase; public IntPtr lpStartAddress; }
-    [StructLayout(LayoutKind.Explicit,Size=84)] public struct U { [FieldOffset(0)] public EI ex; [FieldOffset(0)] public CTI ct; }
-    [StructLayout(LayoutKind.Sequential)] public struct DE { public uint code,pid,tid; public U u; }
+
+    // x86 DEBUG_EVENT is 96 bytes: three DWORD header fields (12 bytes) plus an
+    // 84-byte union. We only need three union members, so map them directly at their
+    // native x86 offsets instead of overlapping managed sub-structs.
+    // union+0x00: EXCEPTION_RECORD.ExceptionCode / CREATE_THREAD_DEBUG_INFO.hThread
+    // union+0x0C: EXCEPTION_RECORD.ExceptionAddress
+    [StructLayout(LayoutKind.Explicit, Size=96)] public struct DE {
+        [FieldOffset(0)]  public uint code;
+        [FieldOffset(4)]  public uint pid;
+        [FieldOffset(8)]  public uint tid;
+        [FieldOffset(12)] public uint exceptionCode;
+        [FieldOffset(12)] public IntPtr hThread;
+        [FieldOffset(24)] public uint exceptionAddress;
+    }
 
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool DebugActiveProcess(uint p);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool DebugActiveProcessStop(uint p);
@@ -82,7 +91,7 @@ public static class AotrDualExec32V5 {
     static int ArmHandle(IntPtr h,uint a0,uint a1){
         if(h==IntPtr.Zero)return 0;
         CTX c=New(CD); if(!GetThreadContext(h,ref c))return 0;
-        bool ours=(c.Dr0==a0 && c.Dr1==a1 && (c.Dr7&0x0Fu)==0x05u && (c.Dr7&0xF0u)==0u);
+        bool ours=(c.Dr0==a0 && c.Dr1==a1 && (c.Dr7&DR01MASK)==0x05u);
         if(ours)return 2;
         if((c.Dr7&0xFFu)!=0u)return -1;
         c.Dr0=a0; c.Dr1=a1; c.Dr7&=~DR01MASK; c.Dr7|=0x05u; c.Dr6=0;
@@ -125,17 +134,15 @@ public static class AotrDualExec32V5 {
                     armed=true; Signal(readyFile,"STATUS=READY\r\nARMED_THREADS="+count+"\r\nTARGET_THREADS="+total+"\r\nPID="+pid+"\r\n"); Signal(statusFile,"STAGE=ARMED\r\nARMED_THREADS="+count+"\r\nTARGET_THREADS="+total+"\r\nCLEAN_DETACH=NO\r\n");
                 }
                 else if(armed && e.code==CT){
-                    // CREATE_THREAD_DEBUG_INFO.hThread is valid here and has GET/SET_CONTEXT rights.
-                    // The debug event occurs before the new thread executes user-mode code.
-                    int r=ArmHandle(e.u.ct.hThread,cb,comp);
+                    int r=ArmHandle(e.hThread,cb,comp);
                     if(r<=0)throw new Exception("Failed to arm CREATE_THREAD_DEBUG_EVENT tid="+e.tid+" result="+r+" win32="+Marshal.GetLastWin32Error());
                     newThreads++; l.AppendLine("CREATE_THREAD_ARMED=YES TID="+e.tid+" MODE="+(r==2?"ALREADY":"EVENT_HANDLE"));
                 }
 
                 uint cont=CONT;
                 if(e.code==EX){
-                    uint code=e.u.ex.er.Code;
-                    if(code==SS){ CTX c; if(Get(e.tid,out c)){ bool h0=(c.Dr6&1)!=0,h1=(c.Dr6&2)!=0; if(h0||h1){ if(h0){cbHits++;l.AppendLine("CALLBACK_8496C2_HIT=YES");l.AppendLine("CALLBACK_HIT_COUNT="+cbHits);} if(h1){compHits++;l.AppendLine("COMPLETION_84944F_HIT=YES");l.AppendLine("COMPLETION_HIT_COUNT="+compHits);} l.AppendLine("ELAPSED_MS="+sw.Elapsed.TotalMilliseconds.ToString("F3",System.Globalization.CultureInfo.InvariantCulture)); l.AppendLine("THREAD_ID="+e.tid+" EXCEPTION_ADDRESS="+F(e.u.ex.er.Addr)+" EIP="+F(c.Eip)); l.AppendLine("EAX="+F(c.Eax)+" EBX="+F(c.Ebx)+" ECX="+F(c.Ecx)+" EDX="+F(c.Edx)+" ESI="+F(c.Esi)+" EDI="+F(c.Edi)); State(l,ph,c); Clear6(e.tid); } } }
+                    uint code=e.exceptionCode;
+                    if(code==SS){ CTX c; if(Get(e.tid,out c)){ bool h0=(c.Dr6&1)!=0,h1=(c.Dr6&2)!=0; if(h0||h1){ if(h0){cbHits++;l.AppendLine("CALLBACK_8496C2_HIT=YES");l.AppendLine("CALLBACK_HIT_COUNT="+cbHits);} if(h1){compHits++;l.AppendLine("COMPLETION_84944F_HIT=YES");l.AppendLine("COMPLETION_HIT_COUNT="+compHits);} l.AppendLine("ELAPSED_MS="+sw.Elapsed.TotalMilliseconds.ToString("F3",System.Globalization.CultureInfo.InvariantCulture)); l.AppendLine("THREAD_ID="+e.tid+" EXCEPTION_ADDRESS="+F(e.exceptionAddress)+" EIP="+F(c.Eip)); l.AppendLine("EAX="+F(c.Eax)+" EBX="+F(c.Ebx)+" ECX="+F(c.Ecx)+" EDX="+F(c.Edx)+" ESI="+F(c.Esi)+" EDI="+F(c.Edi)); State(l,ph,c); Clear6(e.tid); } } }
                     else if(code==BP && stopRequested){ Signal(statusFile,"STAGE=DISARMING\r\nCLEAN_DETACH=NO\r\n"); int total=ThreadCount(pid),cleared=DisarmAll(pid); if(total>0&&cleared!=total){ total=ThreadCount(pid); cleared=DisarmAll(pid); } l.AppendLine("DISARMED_THREADS="+cleared); l.AppendLine("DISARM_TARGET_THREADS="+total); if(total<=0||cleared!=total){ Signal(statusFile,"STAGE=DISARM_FAILED\r\nDISARMED_THREADS="+cleared+"\r\nTARGET_THREADS="+total+"\r\nCLEAN_DETACH=NO\r\n"); throw new Exception("Hardware breakpoint disarm incomplete: disarmed="+cleared+" target="+total); } cleanDetach=true; done=true; }
                     else if(code!=BP)cont=NA;
                 }
