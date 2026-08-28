@@ -39,19 +39,20 @@ public static class AotrDualExec32V5 {
     [StructLayout(LayoutKind.Sequential)] public struct CTX { public uint Flags,Dr0,Dr1,Dr2,Dr3,Dr6,Dr7; public FSA fs; public uint Gs,Fs,Es,Ds,Edi,Esi,Ebx,Edx,Ecx,Eax,Ebp,Eip,Cs,EFlags,Esp,Ss; [MarshalAs(UnmanagedType.ByValArray,SizeConst=512)] public byte[] x; }
 
     // x86 DEBUG_EVENT = 12-byte header + 84-byte union = 96 bytes.
-    // Only fields used by this watcher are mapped. All overlapped fields are blittable.
+    // union0 is interpreted as CREATE_THREAD_DEBUG_INFO.hThread for CT events,
+    // or as the 32-bit EXCEPTION_RECORD.ExceptionCode for EX events.
+    // No fields overlap in the managed definition.
     [StructLayout(LayoutKind.Explicit, Size=96)] public struct DE {
         [FieldOffset(0)]  public uint code;
         [FieldOffset(4)]  public uint pid;
         [FieldOffset(8)]  public uint tid;
-        [FieldOffset(12)] public uint exceptionCode;
-        [FieldOffset(12)] public IntPtr hThread;
+        [FieldOffset(12)] public IntPtr union0;
         [FieldOffset(24)] public uint exceptionAddress;
     }
 
     public static string LayoutSelfTest(){
         int size=Marshal.SizeOf(typeof(DE));
-        int h=Marshal.OffsetOf(typeof(DE),"hThread").ToInt32();
+        int h=Marshal.OffsetOf(typeof(DE),"union0").ToInt32();
         int a=Marshal.OffsetOf(typeof(DE),"exceptionAddress").ToInt32();
         return "DEBUG_EVENT_SIZE="+size+" HTHREAD_OFFSET="+h+" EXADDR_OFFSET="+a;
     }
@@ -119,14 +120,14 @@ public static class AotrDualExec32V5 {
                     armed=true; Signal(readyFile,"STATUS=READY\r\nARMED_THREADS="+count+"\r\nTARGET_THREADS="+total+"\r\nPID="+pid+"\r\n"); Signal(statusFile,"STAGE=ARMED\r\nARMED_THREADS="+count+"\r\nTARGET_THREADS="+total+"\r\nCLEAN_DETACH=NO\r\n");
                 }
                 else if(armed && e.code==CT){
-                    int r=ArmHandle(e.hThread,cb,comp);
+                    int r=ArmHandle(e.union0,cb,comp);
                     if(r<=0)throw new Exception("Failed to arm CREATE_THREAD_DEBUG_EVENT tid="+e.tid+" result="+r+" win32="+Marshal.GetLastWin32Error());
                     newThreads++; l.AppendLine("CREATE_THREAD_ARMED=YES TID="+e.tid+" MODE="+(r==2?"ALREADY":"EVENT_HANDLE"));
                 }
 
                 uint cont=CONT;
                 if(e.code==EX){
-                    uint code=e.exceptionCode;
+                    uint code=unchecked((uint)e.union0.ToInt32());
                     if(code==SS){ CTX c; if(Get(e.tid,out c)){ bool h0=(c.Dr6&1)!=0,h1=(c.Dr6&2)!=0; if(h0||h1){ if(h0){cbHits++;l.AppendLine("CALLBACK_8496C2_HIT=YES");l.AppendLine("CALLBACK_HIT_COUNT="+cbHits);} if(h1){compHits++;l.AppendLine("COMPLETION_84944F_HIT=YES");l.AppendLine("COMPLETION_HIT_COUNT="+compHits);} l.AppendLine("ELAPSED_MS="+sw.Elapsed.TotalMilliseconds.ToString("F3",System.Globalization.CultureInfo.InvariantCulture)); l.AppendLine("THREAD_ID="+e.tid+" EXCEPTION_ADDRESS="+F(e.exceptionAddress)+" EIP="+F(c.Eip)); l.AppendLine("EAX="+F(c.Eax)+" EBX="+F(c.Ebx)+" ECX="+F(c.Ecx)+" EDX="+F(c.Edx)+" ESI="+F(c.Esi)+" EDI="+F(c.Edi)); State(l,ph,c); Clear6(e.tid); } } }
                     else if(code==BP && stopRequested){ Signal(statusFile,"STAGE=DISARMING\r\nCLEAN_DETACH=NO\r\n"); int total=ThreadCount(pid),cleared=DisarmAll(pid); if(total>0&&cleared!=total){ total=ThreadCount(pid); cleared=DisarmAll(pid); } l.AppendLine("DISARMED_THREADS="+cleared); l.AppendLine("DISARM_TARGET_THREADS="+total); if(total<=0||cleared!=total){ Signal(statusFile,"STAGE=DISARM_FAILED\r\nDISARMED_THREADS="+cleared+"\r\nTARGET_THREADS="+total+"\r\nCLEAN_DETACH=NO\r\n"); throw new Exception("Hardware breakpoint disarm incomplete: disarmed="+cleared+" target="+total); } cleanDetach=true; done=true; }
                     else if(code!=BP)cont=NA;
