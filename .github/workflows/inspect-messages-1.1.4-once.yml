@@ -1,0 +1,38 @@
+name: Inspect Messages 1.1.4 Once
+
+on:
+  push:
+    branches:
+      - inspect/messages-1.1.4
+    paths:
+      - '.github/workflows/inspect-messages-1.1.4-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Extract embedded GUI message logic
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe = Join-Path (Get-Location) 'AotR 8P WotR Mod.exe'
+          $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+          $s=$asm.GetManifestResourceStream('AotR8P.GuiScript')
+          if(-not $s){throw 'GUI resource missing'}
+          $gui=Join-Path $env:RUNNER_TEMP 'gui.ps1'
+          try{$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
+          $lines=Get-Content -LiteralPath $gui
+          $patterns=@('report pending','pending','MESSAGES','Messages','last_seen','LastSeen','message_id','MessageId','fingerprint','master_issue','MasterIssue','Register-SupportFingerprint','Refresh','maintainer')
+          $hits=New-Object System.Collections.Generic.SortedSet[int]
+          for($i=0;$i -lt $lines.Count;$i++){
+            foreach($p in $patterns){if($lines[$i] -match [regex]::Escape($p)){[void]$hits.Add($i);break}}
+          }
+          foreach($i in $hits){
+            $from=[Math]::Max(0,$i-5);$to=[Math]::Min($lines.Count-1,$i+10)
+            Write-Host ('----- CONTEXT {0}-{1} -----' -f ($from+1),($to+1))
+            for($j=$from;$j -le $to;$j++){Write-Host ('{0:D5}: {1}' -f ($j+1),$lines[$j])}
+          }
