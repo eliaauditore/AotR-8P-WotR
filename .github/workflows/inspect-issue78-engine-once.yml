@@ -15,27 +15,37 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Extract live embedded engine and show link logic
+      - name: Extract live embedded engine and GUI repair logic
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path '.\AotR 8P WotR Mod.exe').Path
           $asm = [Reflection.Assembly]::LoadFile($exe)
-          $stream = $asm.GetManifestResourceStream('AotR8P.EngineScript')
-          if (-not $stream) { throw 'AotR8P.EngineScript resource missing' }
-          $reader = New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true)
-          try { $text = $reader.ReadToEnd() } finally { $reader.Dispose(); $stream.Dispose() }
-          $path = Join-Path $env:RUNNER_TEMP 'launcher_engine_113.ps1'
-          [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
-          $sha = (Get-FileHash -Algorithm SHA256 $path).Hash
-          Write-Host "ENGINE_RESOURCE_SHA256=$sha"
-          $lines = Get-Content -LiteralPath $path
-          $hits = for ($i=0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match 'HardLink|SymbolicLink|New-Item.*ItemType|Copy-Item') { $i }
+
+          function Read-Resource([string]$Name,[string]$OutName) {
+            $stream = $asm.GetManifestResourceStream($Name)
+            if (-not $stream) { throw "$Name resource missing" }
+            $reader = New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true)
+            try { $text = $reader.ReadToEnd() } finally { $reader.Dispose(); $stream.Dispose() }
+            $path = Join-Path $env:RUNNER_TEMP $OutName
+            [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
+            Write-Host "$Name SHA256=$((Get-FileHash -Algorithm SHA256 $path).Hash)"
+            return $path
           }
-          if (-not $hits) { throw 'No link/copy logic found in embedded engine' }
-          foreach ($hit in ($hits | Select-Object -Unique)) {
-            $start=[Math]::Max(0,$hit-12); $end=[Math]::Min($lines.Count-1,$hit+18)
-            Write-Host "===== EXCERPT lines $($start+1)-$($end+1) ====="
-            for ($j=$start; $j -le $end; $j++) { Write-Host ('{0:D4}: {1}' -f ($j+1),$lines[$j]) }
+
+          function Show-Hits([string]$Path,[string]$Pattern) {
+            $lines = Get-Content -LiteralPath $Path
+            $hits = for ($i=0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match $Pattern) { $i } }
+            if (-not $hits) { throw "No hits for pattern: $Pattern" }
+            foreach ($hit in ($hits | Select-Object -Unique)) {
+              $start=[Math]::Max(0,$hit-14); $end=[Math]::Min($lines.Count-1,$hit+24)
+              Write-Host "===== $([IO.Path]::GetFileName($Path)) lines $($start+1)-$($end+1) ====="
+              for ($j=$start; $j -le $end; $j++) { Write-Host ('{0:D4}: {1}' -f ($j+1),$lines[$j]) }
+            }
           }
+
+          $engine = Read-Resource 'AotR8P.EngineScript' 'launcher_engine_113.ps1'
+          Show-Hits $engine 'function New-LinkedFile|function New-LinkedDirectory|_AOTR_8P_WOTR_RUNTIME'
+
+          $gui = Read-Resource 'AotR8P.GuiScript' 'launcher_gui_113.ps1'
+          Show-Hits $gui 'reset_runtime|Reset-Runtime|Invoke-RepairAction|A8P-ENGINE-001|Launch timeout'
