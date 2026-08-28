@@ -75,7 +75,7 @@ public static class AotrDualExec32V4 {
 
     static CTX New(uint f){ CTX c=new CTX(); c.Flags=f; c.fs.r=new byte[80]; c.x=new byte[512]; return c; }
     static uint R(IntPtr h,uint a){ if(a==0)return 0; byte[] b=new byte[4]; UIntPtr g; if(!ReadProcessMemory(h,new IntPtr(unchecked((int)a)),b,new UIntPtr(4u),out g)||g.ToUInt64()!=4)return 0; return BitConverter.ToUInt32(b,0); }
-    static bool SetBp(uint tid,uint a0,uint a1,bool on){ IntPtr h=OpenThread(TA,false,tid); if(h==IntPtr.Zero)return false; try{ CTX c=New(CD); if(!GetThreadContext(h,ref c))return false; if(on){ c.Dr0=a0;c.Dr1=a1;c.Dr7&=~0x000F00FFu;c.Dr7|=0x5u;c.Dr6=0; } else { c.Dr0=0;c.Dr1=0;c.Dr7&=~0x000F00FFu;c.Dr6=0; } return SetThreadContext(h,ref c); } finally { CloseHandle(h); } }
+    static bool SetBp(uint tid,uint a0,uint a1,bool on){ IntPtr h=OpenThread(TA,false,tid); if(h==IntPtr.Zero)return false; try{ CTX c=New(CD); if(!GetThreadContext(h,ref c))return false; if(on){ if((c.Dr7&0xFFu)!=0)return false; c.Dr0=a0;c.Dr1=a1;c.Dr7&=~0x00FF00FFu;c.Dr7|=0x5u;c.Dr6=0; } else { c.Dr0=0;c.Dr1=0;c.Dr7&=~0x00FF00FFu;c.Dr6=0; } return SetThreadContext(h,ref c); } finally { CloseHandle(h); } }
     static int ThreadCount(int pid){ try{return Process.GetProcessById(pid).Threads.Count;}catch{return 0;} }
     static int All(int pid,uint a0,uint a1,bool on){ int n=0; try{ foreach(ProcessThread t in Process.GetProcessById(pid).Threads) if(SetBp((uint)t.Id,a0,a1,on))n++; }catch{} return n; }
     static bool Get(uint tid,out CTX c){ c=New(CAP); IntPtr h=OpenThread(TA,false,tid); if(h==IntPtr.Zero)return false; try{return GetThreadContext(h,ref c);}finally{CloseHandle(h);} }
@@ -154,7 +154,6 @@ public static class AotrDualExec32V4 {
                         int total=ThreadCount(pid);
                         int cleared=All(pid,cb,comp,false);
                         if(total>0 && cleared!=total){
-                            // One retry while the debuggee is still stopped by the debugger event.
                             total=ThreadCount(pid);
                             cleared=All(pid,cb,comp,false);
                         }
