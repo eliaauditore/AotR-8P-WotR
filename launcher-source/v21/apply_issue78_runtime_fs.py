@@ -12,13 +12,33 @@ ENGINE_LINK_FILE = r'''function Get-AotR8PVolumeRoot([string]$Path) {
     catch { return "" }
 }
 
+function Get-AotR8PRuntimeStageRoot([string]$InstallRoot, [string]$StateRoot) {
+    try {
+        $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($InstallRoot))
+        if (-not [string]::IsNullOrWhiteSpace($root)) {
+            $drive = New-Object IO.DriveInfo($root)
+            # Preserve the established 1.1.3 layout on normal NTFS installs.
+            # FAT/exFAT/removable layouts that cannot host our link staging are
+            # redirected to the user's local Windows state volume instead.
+            if ($drive.IsReady -and [string]$drive.DriveFormat -ieq "NTFS") {
+                return [IO.Path]::GetFullPath($InstallRoot)
+            }
+        }
+    }
+    catch {}
+
+    $localRuntimeRoot = Join-Path $StateRoot "runtime"
+    New-Item -ItemType Directory -Force -Path $localRuntimeRoot | Out-Null
+    return [IO.Path]::GetFullPath($localRuntimeRoot)
+}
+
 function New-LinkedFile([string]$Source, [string]$Destination) {
     if (Test-Path -LiteralPath $Destination) {
         Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
     }
 
     # Hard links can only exist on the same volume. Avoid a guaranteed
-    # terminating error for external/removable AotR installations.
+    # terminating error when a non-NTFS/external AotR source is staged locally.
     $sourceRoot = Get-AotR8PVolumeRoot $Source
     $destinationRoot = Get-AotR8PVolumeRoot $Destination
     if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and $sourceRoot -eq $destinationRoot) {
@@ -29,15 +49,12 @@ function New-LinkedFile([string]$Source, [string]$Destination) {
         catch {}
     }
 
-    # The runtime itself lives on the local Windows volume in 1.1.4, so a
-    # symbolic link can safely point back to an external AotR source volume.
     try {
         New-Item -ItemType SymbolicLink -Path $Destination -Target $Source -ErrorAction Stop | Out-Null
         return
     }
     catch {}
 
-    # Last-resort compatibility path for systems where link creation is blocked.
     Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
 }
 '''
@@ -47,8 +64,8 @@ ENGINE_LINK_DIR = r'''function New-LinkedDirectory([string]$Source, [string]$Des
         Remove-Item -LiteralPath $Destination -Force -Recurse -ErrorAction SilentlyContinue
     }
 
-    # Destination is local from 1.1.4 onward. Prefer a directory reparse point
-    # so even an external source tree does not need to be recursively copied.
+    # The destination is always on a link-capable NTFS volume when the source
+    # install itself is not. Prefer reparse points and copy only as last resort.
     try {
         New-Item -ItemType Junction -Path $Destination -Target $Source -ErrorAction Stop | Out-Null
         return
@@ -81,9 +98,8 @@ GUI_RESET_RUNTIME = r'''function Reset-PortableRuntime {
         }
     }
 
-    # 1.1.3 and older staged the runtime beside AotR. Quarantine those paths
-    # best-effort so upgrades clean up the old external-drive layout without
-    # ever recurse-deleting a directory that may contain junctions.
+    # 1.1.3 and normal NTFS installs may stage beside AotR. Also scan that
+    # layout so a repair works correctly across upgrades in either direction.
     $legacyPrimary = Join-Path $Install.Root "_AOTR_8P_WOTR_RUNTIME"
     $paths.Add($legacyPrimary)
     if (Test-Path -LiteralPath $Install.Root -PathType Container) {
@@ -113,9 +129,8 @@ GUI_RESET_RUNTIME = r'''function Reset-PortableRuntime {
         }
         catch {
             Write-RepairLog ("Runtime quarantine failed: " + $_.Exception.Message)
-            # Failure to move the new local runtime can block the next build.
-            # Legacy external paths are no longer used in 1.1.4, so their
-            # cleanup is deliberately best-effort.
+            # A stale local fallback runtime can block a rebuild; old install-root
+            # cleanup stays best-effort because a non-NTFS drive may deny it.
             if ($isLocalRuntime) { throw }
         }
     }
@@ -144,8 +159,7 @@ def patch_engine(path: Path) -> None:
     text = replace_function(text, "New-LinkedDirectory", ENGINE_LINK_DIR)
 
     old_runtime = '$test      = Join-Path $install.Root "_AOTR_8P_WOTR_RUNTIME"'
-    new_runtime = '''$runtimeStageRoot = Join-Path $stateRoot "runtime"
-New-Item -ItemType Directory -Force -Path $runtimeStageRoot | Out-Null
+    new_runtime = '''$runtimeStageRoot = Get-AotR8PRuntimeStageRoot $install.Root $stateRoot
 $test      = Join-Path $runtimeStageRoot "_AOTR_8P_WOTR_RUNTIME"'''
     if text.count(old_runtime) != 1:
         raise SystemExit(f"engine primary runtime anchor count={text.count(old_runtime)}")
@@ -157,8 +171,8 @@ $test      = Join-Path $runtimeStageRoot "_AOTR_8P_WOTR_RUNTIME"'''
         raise SystemExit(f"engine fresh-runtime anchor count={text.count(old_sibling)}")
     text = text.replace(old_sibling, new_sibling, 1)
 
-    if '$test      = Join-Path $install.Root "_AOTR_8P_WOTR_RUNTIME"' in text:
-        raise SystemExit("legacy external primary runtime anchor remains")
+    if text.count('Get-AotR8PRuntimeStageRoot') < 2:
+        raise SystemExit("runtime stage selector was not wired into engine")
     path.write_text(text, encoding="utf-8-sig", newline="\n")
 
 
