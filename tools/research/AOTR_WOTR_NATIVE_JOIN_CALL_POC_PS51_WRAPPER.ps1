@@ -17,6 +17,10 @@ $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 on the VM rejects those conversions before the native join executes.
 # This wrapper creates a temporary copy and replaces only those two PowerShell-side
 # conversions with explicit UIntPtr constructor calls. No game.dat bytes are changed.
+#
+# IMPORTANT: invoke the patched script with NAMED splatting (hashtable), not array
+# splatting. Array splatting passes '-ProcessId' as the first positional argument and
+# causes PS5.1 to try converting the literal string '-ProcessId' to Int32.
 
 if (-not (Test-Path -LiteralPath $SourcePath)) {
     throw "Source PoC not found: $SourcePath"
@@ -46,16 +50,16 @@ try {
     Write-Host '============================================================'
     Write-Host ("Source : {0}" -f $SourcePath)
     Write-Host ("Temp   : {0}" -f $temp)
-    Write-Host 'Fixes  : UIntPtr(0x1000), UIntPtr(stub length)'
+    Write-Host 'Fixes  : UIntPtr(0x1000), UIntPtr(stub length), named parameter splatting'
     Write-Host ''
 
-    $invoke = @(
-        '-ProcessId', [string]$ProcessId,
-        '-ExpectedRemoteIp', $ExpectedRemoteIp,
-        '-ExpectedRemotePort', [string]$ExpectedRemotePort,
-        '-ObserveSeconds', [string]$ObserveSeconds
-    )
-    if ($Execute) { $invoke += '-Execute' }
+    $invoke = @{
+        ProcessId          = [int]$ProcessId
+        ExpectedRemoteIp   = [string]$ExpectedRemoteIp
+        ExpectedRemotePort = [int]$ExpectedRemotePort
+        ObserveSeconds     = [int]$ObserveSeconds
+    }
+    if ($Execute) { $invoke['Execute'] = $true }
 
     & $temp @invoke
     if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
