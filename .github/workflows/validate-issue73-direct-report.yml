@@ -1,0 +1,159 @@
+name: Validate Issue73 Direct Report
+
+on:
+  push:
+    branches:
+      - feature/accountless-direct-report
+    paths:
+      - "launcher-source/v19/**"
+      - "direct-report-backend/**"
+      - "direct-report.json"
+      - ".github/workflows/validate-issue73-direct-report.yml"
+  pull_request:
+    paths:
+      - "launcher-source/v19/**"
+      - "direct-report-backend/**"
+      - "direct-report.json"
+      - ".github/workflows/validate-issue73-direct-report.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature head
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Build exact Issue73 candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_ISSUE73_VALIDATE `
+            -LauncherVersion 1.1.2
+
+      - name: Verify launcher reporting contract and immutable runtime chain
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='.\_ISSUE73_VALIDATE\work\resources'
+          $gui=Join-Path $root 'launcher_gui.ps1'
+          $engine=Join-Path $root 'launcher_engine.ps1'
+          $final=Join-Path $root 'final_stable_v7.ps1'
+          $shellcode=Join-Path $root 'v7_shellcode.bin'
+
+          $expectedGui='585E3D43B407E2E7A26D6B8B6B4D8F06952C81EA58847B21AE71BC6BC54A4A24'
+          $guiHash=(Get-FileHash -LiteralPath $gui -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($guiHash -ne $expectedGui){throw "GUI drift: $guiHash"}
+          if((Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash.ToUpperInvariant() -ne '5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938'){throw 'Engine drift'}
+          if((Get-FileHash -LiteralPath $final -Algorithm SHA256).Hash.ToUpperInvariant() -ne '72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2'){throw 'FINAL_STABLE_V7 drift'}
+          if((Get-FileHash -LiteralPath $shellcode -Algorithm SHA256).Hash.ToUpperInvariant() -ne '60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A'){throw 'V7 shellcode drift'}
+
+          $txt=Get-Content -LiteralPath $gui -Raw -Encoding UTF8
+          foreach($token in @(
+            'SEND REPORT','OPEN GITHUB','COPY REPORT',
+            'function Send-LauncherReport {',
+            'function Open-LauncherReport {',
+            'function Copy-LauncherReport {',
+            'function Open-ExternalUrlSafe([string]$Url)',
+            '$script:HttpClient.PostAsync($endpoint,$content)',
+            'direct-report.json',
+            'REPORT SENT — ',
+            'A8P-TICKET-{0:D4}',
+            '$DiagRetryHit.Add_MouseLeftButtonUp({' 
+          )){
+            if($txt.IndexOf($token,[StringComparison]::Ordinal) -lt 0){throw "Required GUI token missing: $token"}
+          }
+          foreach($forbidden in @('GITHUB_REPORT_TOKEN','Authorization: Bearer','github_pat_','ghp_')){
+            if($txt.IndexOf($forbidden,[StringComparison]::Ordinal) -ge 0){throw "Client secret marker found: $forbidden"}
+          }
+
+          Write-Host "ISSUE73_GUI_SHA256=$guiHash"
+          Write-Host 'ISSUE73_LAUNCHER_REPORTING_GATE=PASS'
+          Write-Host 'ISSUE73_ENGINE_V7_IMMUTABILITY_GATE=PASS'
+          Write-Host 'ISSUE73_NO_CLIENT_SECRET_GATE=PASS'
+
+      - name: Validate backend contract without GitHub credential
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check .\direct-report-backend\api\report.js
+          if($LASTEXITCODE -ne 0){throw 'Backend syntax invalid'}
+
+          $test=@'
+          const handler = require('./direct-report-backend/api/report.js');
+          function res(){return {statusCode:0,headers:{},body:'',setHeader(k,v){this.headers[k]=v},end(v){this.body=v||''}}}
+          async function call(method,body,headers={}){
+            const r=res();
+            await handler({method,body,headers,socket:{remoteAddress:'127.0.0.1'}},r);
+            let parsed={}; try{parsed=JSON.parse(r.body||'{}')}catch{}
+            return {status:r.statusCode,body:parsed};
+          }
+          (async()=>{
+            let x=await call('GET',null,{});
+            if(x.status!==200||x.body.ok!==true) throw new Error('GET health contract failed');
+
+            x=await call('POST',{support_bundle:{schema:1,error_code:'BAD',fingerprint:'A8P-FP-0123456789AB'}},{'content-length':'100'});
+            if(x.status!==400||x.body.error!=='invalid_error_code') throw new Error('Invalid code gate failed');
+
+            x=await call('POST',{support_bundle:{schema:1,error_code:'A8P-ENGINE-001',fingerprint:'BAD'}},{'content-length':'100'});
+            if(x.status!==400||x.body.error!=='invalid_fingerprint') throw new Error('Invalid fingerprint gate failed');
+
+            delete process.env.GITHUB_REPORT_TOKEN;
+            x=await call('POST',{schema:1,title:'Synthetic',exact_error:'Synthetic direct report validation',support_bundle:{schema:1,launcher_version:'1.1.2',error_code:'A8P-ENGINE-001',fingerprint:'A8P-FP-0123456789AB',files:[],repair_attempts:[]}},{'content-length':'400'});
+            if(x.status!==503||x.body.error!=='report_service_not_configured') throw new Error('Missing-server-secret gate failed');
+
+            console.log('ISSUE73_BACKEND_BLACKBOX_GATE=PASS');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          '@
+          [IO.File]::WriteAllText((Join-Path (Get-Location) '_issue73_backend_test.js'),$test,(New-Object Text.UTF8Encoding($false)))
+          node .\_issue73_backend_test.js
+          if($LASTEXITCODE -ne 0){throw 'Backend blackbox gate failed'}
+
+          $cfg=Get-Content -LiteralPath .\direct-report.json -Raw | ConvertFrom-Json
+          if([bool]$cfg.enabled){throw 'Production config enabled before live backend acceptance'}
+          if(-not [string]::IsNullOrWhiteSpace([string]$cfg.endpoint)){throw 'Disabled production config contains endpoint'}
+          Write-Host 'ISSUE73_DISABLED_UNTIL_LIVE_GATE=PASS'
+
+      - name: Record exact candidate identities
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe='.\_ISSUE73_VALIDATE\package\AotR 8P WotR Mod.exe'
+          $zip='.\_ISSUE73_VALIDATE\AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip'
+          if(-not(Test-Path -LiteralPath $exe)){throw 'Candidate EXE missing'}
+          if(-not(Test-Path -LiteralPath $zip)){throw 'Candidate ZIP missing'}
+          Write-Host ('ISSUE73_EXE_SHA256='+(Get-FileHash $exe -Algorithm SHA256).Hash.ToUpperInvariant())
+          Write-Host ('ISSUE73_EXE_SIZE='+(Get-Item $exe).Length)
+          Write-Host ('ISSUE73_ZIP_SHA256='+(Get-FileHash $zip -Algorithm SHA256).Hash.ToUpperInvariant())
+          $defender='.\_ISSUE73_VALIDATE\DEFENDER_SCAN.txt'
+          if(-not(Test-Path -LiteralPath $defender)){throw 'Defender scan evidence missing'}
+          $d=Get-Content -LiteralPath $defender -Raw
+          Write-Host $d
+          if($d -notmatch 'SCANNED_CLEAN'){throw 'Defender did not report SCANNED_CLEAN'}
+          Write-Host 'ISSUE73_EXACT_CANDIDATE_GATE=PASS'
+
+      - name: Upload exact validation candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-Issue73-Validated
+          path: |
+            _ISSUE73_VALIDATE/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _ISSUE73_VALIDATE/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _ISSUE73_VALIDATE/SHA256SUMS.json
+            _ISSUE73_VALIDATE/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
