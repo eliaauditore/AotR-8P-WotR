@@ -79,7 +79,7 @@ Post-sync evidence for both VM locations:
 - length: `33,211`
 - SHA-256: `2D162EE705DE9D96A7B65140C22EBA6EBD0B8F155AE062C97F9884E37DC59F4D`
 
-Both active/source VM copies are therefore byte-identical to Host for this file.
+Both VM copies are therefore byte-identical to Host for this file.
 
 ## Runtime A/B result after PlayerTemplate sync
 
@@ -109,39 +109,83 @@ The complete comparison keys are identical:
 
 `B04=D0B40E9B;A=792B9B94;B=57887307;B38=000EFFF1;LISTCOUNT=8;FLAG=0;ACC=00000008`
 
-Before this file correction, runtime had already proven component B equal while component A differed between Host and VM. After changing only the proven PlayerTemplate delta, component A now equals Host and therefore B04 equals Host as well.
+Before this file correction, runtime had already proven component B equal while component A differed between Host and VM. After changing only the proven PlayerTemplate delta, component A equals Host and therefore B04 equals Host as well.
 
-## Classification
+## Controlled native Join rerun — SUCCESS
+
+With files left unchanged after the PlayerTemplate synchronization, the same controlled native `C54CE0 +0x40` Join Request was executed exactly once from the VM.
+
+VM pre-call contract:
+
+- `game.dat` SHA-256: `CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC`
+- session vtable: `0x00C54CE0` PASS
+- vtable `+0x40`: `0x0084CB34` PASS
+- session state `+0x28 = 0` PASS
+- session `+0x44 = NULL` before call
+- local endpoint: `192.168.0.57:8086`
+- exactly one remote GameInfo matched Host `192.168.0.224:8086`
+
+The native call returned successfully.
+
+VM post-call state:
+
+- `session+0x44`: `0x00000000 -> 0x09448408`
+- current object vtable: `0x00C54B78` (expected Network GameInfo vtable)
+- P1: Type6 `192.168.0.224:8086`
+- P2: Type6 `192.168.0.57:8086` LOCAL
+- P3/P4 remain Type3
+- P5-P8 remain Type1
+- `NATIVE_JOIN_STATE_OBSERVED = YES`
+
+Simultaneously, the read-only Host transient watcher observed the authoritative slot transition:
+
+- P2 changed from `type=0 endpoint={0,0}`
+- to `type=6 endpoint=192.168.0.57:8086`
+- `Any slot change = True`
+- `Client Type6 seen = True`
+- `HOST_PATH_C_COMMIT_OBSERVED = YES`
+
+This is the success behavior that was absent before the PlayerTemplate correction.
+
+## Root-cause closure
 
 ### BEWIESEN
 
 - Among every file present on the VM, only three shared paths differed from Host in the captured manifests.
 - The only differing shared game-data file was `playertemplate.ini`, present in two mirrored locations.
-- The complete byte delta inside `playertemplate.ini` is exactly 22 semicolons.
-- Those semicolons comment out `StartingUnit3 = PvPModePing` and its zero offset in 11 PlayerTemplate blocks on VM while Host has them active.
-- Removing only those 22 semicolons produces the exact Host file length and SHA-256.
-- Both VM PlayerTemplate copies are now byte-identical to Host.
-- Before correction, component B matched while component A differed between Host and VM.
-- After changing only PlayerTemplate, Host and VM have identical component A, component B, B04, B38 and associated component-B object state.
-- Therefore this A/B experiment closes the causal links `playertemplate.ini mismatch -> Component-A mismatch -> B04 mismatch` for the tested state.
+- The complete byte delta inside `playertemplate.ini` was exactly 22 semicolons.
+- Those semicolons commented out `StartingUnit3 = PvPModePing` and `StartingUnitOffset3 = X:0 Y:0 Z:0` in 11 PlayerTemplate blocks on VM while Host had them active.
+- Removing only those 22 semicolons produced the exact Host length and SHA-256.
+- Both VM PlayerTemplate copies were synchronized to the Host SHA-256 without modifying unrelated files.
+- Before correction, component B matched while component A differed between Host and VM, producing a B04 mismatch.
+- After changing only PlayerTemplate, Host and VM had identical component A, component B, B04, B38 and related object state.
+- With B04 aligned, the same controlled native Join Request that previously failed now succeeds.
+- Host commits the client as Type6 in P2 and VM enters native joined state with non-NULL `session+0x44`.
 
-### STARKER HINWEIS
+Therefore, for the reproduced Host/VM state, the causal chain is closed:
 
-The exact file delta explains the previously observed serializer sequence shift: Host serializes `StartingUnit3/PvPModePing` where the old VM file skipped those commented directives and reached later `StartingUnit*` entries first.
+`playertemplate.ini mismatch -> PlayerTemplate serializer divergence -> Component-A mismatch -> B04 mismatch -> PATH_C validation rejection -> no Type6 commit`
 
-The remaining leading chain is now narrowed to:
+and after the one-file correction:
 
-`PlayerTemplate mismatch -> Component-A mismatch -> B04 mismatch` **BEWIESEN**, followed by `B04 mismatch -> PATH_C Reason4 reject` still requiring the controlled native join rerun.
+`PlayerTemplate match -> Component-A match -> B04 match -> PATH_C success path -> Host P2 Type6 commit -> VM native joined state`
 
-### HYPOTHESE still to test
+The earlier PATH_C failure had been localized to the B04/Reason4 comparison path; the successful one-variable A/B rerun closes that final link for this test case.
 
-- With B04 now matching, the prior PATH_C Reason4 reject will disappear.
-- If the join still fails, either a different PATH_C predicate fires or a later validation/state transition remains divergent.
+## Reproducible fix
+
+For installations exhibiting the old VM state, the relevant `playertemplate.ini` must match the canonical Host/reference content:
+
+- canonical length: `33,211`
+- canonical SHA-256: `2D162EE705DE9D96A7B65140C22EBA6EBD0B8F155AE062C97F9884E37DC59F4D`
+- `StartingUnit3 = PvPModePing ;{{CameraToggle}}` active
+- `StartingUnitOffset3 = X:0 Y:0 Z:0 ;{{CameraToggle}}` active
+- applied consistently to both the source path and `_AOTR_8P_WOTR_RUNTIME` mirror used by this installation layout
+
+Do not treat broad reinstall/synchronization as the demonstrated fix. The controlled experiment changed only this proven PlayerTemplate delta.
 
 ## Next gate
 
-1. Keep all files unchanged.
-2. Perform exactly one controlled native ID3 join from VM using the existing `AOTR_WOTR_NATIVE_JOIN_CALL_POC.ps1`.
-3. Observe whether Host returns the prior ID5/Reason4 failure or reaches the ID4 success/Type6 slot-commit path.
-4. Record `session+0x44`, slot mutation, direct response class and, if needed, the PATH_C branch reached.
-5. If Reason4 disappears but another failure remains, investigate only that next branch.
+The PlayerTemplate/B04 native-join blocker is closed. Preserve this working state and hashes.
+
+Next research should continue from the now-successful native joined state rather than revisiting the old Reason4 failure. The immediate candidate is observing the downstream GameInfo/local-slot/LivingWorld handoff after the successful P2 Type6 commit, while keeping this PlayerTemplate baseline frozen.
