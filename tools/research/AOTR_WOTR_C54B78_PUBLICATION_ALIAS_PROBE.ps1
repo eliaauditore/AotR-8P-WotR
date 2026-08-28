@@ -89,22 +89,65 @@ def direct_callers(target):
                 out.append((va,s['name']))
     return out
 
-def refs_target(ins,target):
-    hits=[]
-    for x in ins:
-        kinds=[]
-        for op in x.operands:
-            if op.type==X86_OP_IMM and (op.imm & 0xffffffff)==target:
-                kinds.append('IMM')
-            elif op.type==X86_OP_MEM and op.mem.base==0 and op.mem.index==0 and (op.mem.disp & 0xffffffff)==target:
-                kinds.append('MEM')
-        if kinds: hits.append((x,'+'.join(kinds)))
-    return hits
+def ref_kind(x,target):
+    kinds=[]
+    for op in x.operands:
+        if op.type==X86_OP_IMM and (op.imm & 0xffffffff)==target:
+            kinds.append('IMM')
+        elif op.type==X86_OP_MEM and op.mem.base==0 and op.mem.index==0 and (op.mem.disp & 0xffffffff)==target:
+            kinds.append('MEM')
+    return '+'.join(kinds) if kinds else None
 
-def context_at(va,before=0x30,after=0x50):
-    start=max(IMAGE_BASE,va-before)
-    ins=window(start,before+after)
-    return [x for x in ins if va-before <= x.address <= va+after]
+def aligned_context(target_va,before=0x40,after=0x80):
+    # Try many starts and select a stream that lands exactly on target_va.
+    best=None
+    lo=max(IMAGE_BASE,target_va-before)
+    for start in range(lo,target_va+1):
+        raw=va_to_raw(start); s=sec_for_va(start)
+        if raw is None: continue
+        hi=min(s['rp']+s['rs'],raw+(target_va-start)+after)
+        ins=list(md.disasm(data[raw:hi],start))
+        if any(x.address==target_va for x in ins):
+            cand=[x for x in ins if target_va-before <= x.address <= target_va+after]
+            if best is None or len(cand)>len(best): best=cand
+    return best or []
+
+def robust_refs_to_dword(target):
+    # Raw little-endian hit first, then alignment validation around each occurrence.
+    needle=struct.pack('<I',target)
+    found={}
+    for s in executable_sections():
+        blob=data[s['rp']:s['rp']+s['rs']]
+        pos=0
+        while True:
+            j=blob.find(needle,pos)
+            if j<0: break
+            occ_va=IMAGE_BASE+s['rva']+j
+            for back in range(0,16):
+                start=occ_va-back
+                raw=va_to_raw(start)
+                if raw is None: continue
+                ins=list(md.disasm(data[raw:raw+32],start))
+                for x in ins[:6]:
+                    if not (x.address <= occ_va < x.address+x.size): continue
+                    kind=ref_kind(x,target)
+                    if kind:
+                        found[(x.address,bytes(x.bytes))]=(x,s['name'],kind)
+            pos=j+1
+    return sorted(found.values(),key=lambda t:t[0].address)
+
+def raw_occurrences(target):
+    needle=struct.pack('<I',target)
+    out=[]; pos=0
+    while True:
+        j=data.find(needle,pos)
+        if j<0: break
+        for s in secs:
+            if s['rp'] <= j < s['rp']+s['rs']:
+                va=IMAGE_BASE+s['rva']+(j-s['rp'])
+                out.append((s,va)); break
+        pos=j+1
+    return out
 
 print('============================================================')
 print(' AOTR WOTR C54B78 PUBLICATION / ALIAS PROBE - DISK ONLY')
@@ -122,69 +165,59 @@ print('')
 
 for i,call in enumerate(CALLS,1):
     print(f'================ C54 ALLOCATION CALLER #{i} @ 0x{call:08X} ================')
-    for x in context_at(call,0x80,0x180): print(fmt(x,'>>' if x.address==call else '  '))
+    ctx=aligned_context(call,0x80,0x180)
+    if not ctx:
+        print('  <alignment-safe context not found>')
+    else:
+        for x in ctx: print(fmt(x,'>>' if x.address==call else '  '))
     print('')
 
-# Decode executable sections linearly from each section start; this is only for references,
-# while raw address scans below catch occurrences that linear decode could miss.
-all_exec=[]
-for s in executable_sections():
-    blob=data[s['rp']:s['rp']+s['rs']]
-    all_exec.extend((x,s['name']) for x in md.disasm(blob,IMAGE_BASE+s['rva']))
-
-print('================ DE892C DECODED EXECUTABLE REFERENCES ================')
-refs=[]
-for x,secname in all_exec:
-    rr=refs_target([x],DE892C)
-    if rr: refs.append((x,secname,rr[0][1]))
+print('================ DE892C ROBUST EXECUTABLE REFERENCES ================')
+refs=robust_refs_to_dword(DE892C)
 print('count='+str(len(refs)))
 for idx,(x,secname,kind) in enumerate(refs,1):
     print(f'-- REF #{idx:02d} section={secname} kind={kind} --')
-    for y in context_at(x.address,0x28,0x48): print(fmt(y,'>>' if y.address==x.address else '  '))
+    ctx=aligned_context(x.address,0x28,0x48)
+    if ctx:
+        for y in ctx: print(fmt(y,'>>' if y.address==x.address else '  '))
+    else:
+        print(fmt(x,'>>'))
     print('')
 
 print('================ RAW DWORD OCCURRENCES OF &DE892C ================')
-needle=struct.pack('<I',DE892C)
-occ=[]
-pos=0
-while True:
-    j=data.find(needle,pos)
-    if j<0: break
-    owner=None
-    for s in secs:
-        if s['rp'] <= j < s['rp']+s['rs']:
-            va=IMAGE_BASE+s['rva']+(j-s['rp'])
-            owner=(s,va); break
-    if owner: occ.append(owner)
-    pos=j+1
+occ=raw_occurrences(DE892C)
 print('count='+str(len(occ)))
 for s,va in occ:
     print(f'  VA=0x{va:08X} section={s["name"]} exec={bool(s["ch"] & 0x20000000)}')
 print('')
 
-# If a non-exec data slot itself contains &DE892C, search code for direct references to that slot.
 for s,slotva in occ:
     if s['ch'] & 0x20000000: continue
     print(f'================ CODE REFS TO DATA ALIAS SLOT 0x{slotva:08X} ================')
-    slotrefs=[]
-    for x,secname in all_exec:
-        rr=refs_target([x],slotva)
-        if rr: slotrefs.append((x,secname,rr[0][1]))
+    slotrefs=robust_refs_to_dword(slotva)
     print('count='+str(len(slotrefs)))
     for x,secname,kind in slotrefs:
         print(f'  {secname} {kind}: {fmt(x,">>")}')
     print('')
 
 print('================ SESSION-REGION +0x44 WRITES ================')
-# Limit to known network/session regions where current GameInfo ownership lives.
 for start,size,label in ((0x0084C700,0x1400,'SESSION_84C7_84DB'),(0x00989A00,0x1600,'PATH_989A_98B0')):
     print('-- '+label+' --')
-    for x in window(start,size):
-        if x.mnemonic not in ('mov','xchg','and','or'): continue
-        if not x.operands: continue
-        op=x.operands[0]
-        if op.type==X86_OP_MEM and (op.mem.disp & 0xffffffff)==0x44:
-            print(fmt(x,'>>'))
+    # Decode from every byte and dedupe validated instructions with destination displacement +0x44.
+    hits={}
+    s=sec_for_va(start); raw0=va_to_raw(start)
+    if s and raw0 is not None:
+        maxlen=min(size,s['rp']+s['rs']-raw0)
+        for off in range(maxlen):
+            va=start+off; raw=raw0+off
+            ins=list(md.disasm(data[raw:raw+16],va))
+            if not ins: continue
+            x=ins[0]
+            if x.mnemonic not in ('mov','xchg','and','or') or not x.operands: continue
+            op=x.operands[0]
+            if op.type==X86_OP_MEM and (op.mem.disp & 0xffffffff)==0x44:
+                hits[(x.address,bytes(x.bytes))]=x
+    for _,x in sorted(hits.items(),key=lambda kv:kv[1].address): print(fmt(x,'>>'))
     print('')
 
 print('INTERPRETATION TARGETS')
