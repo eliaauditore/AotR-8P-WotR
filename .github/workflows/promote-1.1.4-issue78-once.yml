@@ -1,0 +1,137 @@
+name: Promote 1.1.4 Issue78 Once
+
+on:
+  push:
+    branches:
+      - hotfix/external-drive-link-fallback
+    paths:
+      - '.github/workflows/promote-1.1.4-issue78-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build, verify exFAT behavior, and promote exact bytes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $out = "$env:RUNNER_TEMP\issue78-promote"
+          & '.\launcher-source\v21\BUILD_LAUNCHER_1_1_4_ISSUE78_CANDIDATE.ps1' -OutputRoot $out -LauncherVersion '1.1.4'
+
+          $package = Join-Path $out 'package'
+          $exe = Join-Path $package 'AotR 8P WotR Mod.exe'
+          $exeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
+          $exeSize = (Get-Item -LiteralPath $exe).Length
+          if((Get-Content (Join-Path $out 'DEFENDER_SCAN.txt') -Raw).Trim() -ne 'SCANNED_CLEAN'){throw 'Defender gate not clean'}
+
+          $manifest = Get-Content (Join-Path $package 'manifest.json') -Raw | ConvertFrom-Json
+          if($manifest.launcher_version -ne '1.1.4'){throw 'manifest version mismatch'}
+          if($manifest.launcher_sha256 -ne $exeHash){throw 'manifest launcher hash mismatch'}
+          $repair = Get-Content (Join-Path $package 'repair-manifest.json') -Raw | ConvertFrom-Json
+          if($repair.generated_for_launcher -ne '1.1.4'){throw 'repair manifest version mismatch'}
+          if(-not $repair.plans.'A8P-RUNTIME-FS-001'){throw 'A8P-RUNTIME-FS-001 missing'}
+
+          # Real exFAT validation against the exact binary that will be promoted.
+          $vhd='C:\issue78-promote-exfat.vhd'
+          $letter='R'
+          $diskpart=Join-Path $env:RUNNER_TEMP 'issue78-promote-diskpart.txt'
+          $create = @(
+            ('create vdisk file="{0}" maximum=256 type=expandable' -f $vhd),
+            ('select vdisk file="{0}"' -f $vhd),
+            'attach vdisk',
+            'create partition primary',
+            'format fs=exfat quick label=A8PTEST',
+            ('assign letter={0}' -f $letter)
+          ) -join [Environment]::NewLine
+          [IO.File]::WriteAllText($diskpart,$create,[Text.Encoding]::ASCII)
+          diskpart /s $diskpart | Write-Host
+          if(-not (Test-Path "$letter`:\")){throw 'exFAT test volume did not mount'}
+          $drive=New-Object IO.DriveInfo("$letter`:\")
+          if($drive.DriveFormat -ne 'exFAT'){throw "expected exFAT, got $($drive.DriveFormat)"}
+
+          try {
+            $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+            $s=$asm.GetManifestResourceStream('AotR8P.EngineScript')
+            if(-not $s){throw 'engine resource missing'}
+            $engine=Join-Path $env:RUNNER_TEMP 'issue78-promote-engine.ps1'
+            try{$o=[IO.File]::Create($engine);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
+            $tokens=$null;$errors=$null
+            $ast=[System.Management.Automation.Language.Parser]::ParseFile($engine,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw $errors[0].Message}
+            $names=@('Get-AotR8PVolumeRoot','Get-AotR8PRuntimeStageRoot','New-LinkedFile','New-LinkedDirectory')
+            $wanted=@{};foreach($n in $names){$wanted[$n]=$true}
+            $funcs=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted.ContainsKey($n.Name)},$true))
+            if($funcs.Count -ne $names.Count){throw "function extraction mismatch $($funcs.Count)"}
+            $fnFile=Join-Path $env:RUNNER_TEMP 'issue78-promote-functions.ps1'
+            [IO.File]::WriteAllText($fnFile,(($funcs|ForEach-Object{$_.Extent.Text})-join "`r`n`r`n"),(New-Object Text.UTF8Encoding($false)))
+            . $fnFile
+
+            $install="$letter`:\AotR"
+            $source=Join-Path $install 'aotr'
+            New-Item -ItemType Directory -Force -Path $source | Out-Null
+            $state='C:\A8P_Issue78_Promote_State'
+            $stage=Get-AotR8PRuntimeStageRoot $install $state
+            $expected=[IO.Path]::GetFullPath((Join-Path $state 'runtime'))
+            if($stage -ne $expected){throw "exFAT selector did not redirect local: $stage vs $expected"}
+            [IO.File]::WriteAllText((Join-Path $source 'probe.txt'),'exfat-file',[Text.Encoding]::UTF8)
+            $runtime=Join-Path $stage '_AOTR_8P_WOTR_RUNTIME'
+            New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+            New-LinkedFile (Join-Path $source 'probe.txt') (Join-Path $runtime 'probe.txt')
+            if([IO.File]::ReadAllText((Join-Path $runtime 'probe.txt')) -ne 'exfat-file'){throw 'exFAT file staging failed'}
+            $srcDir=Join-Path $source 'data'
+            New-Item -ItemType Directory -Force -Path $srcDir | Out-Null
+            [IO.File]::WriteAllText((Join-Path $srcDir 'dirprobe.txt'),'exfat-dir',[Text.Encoding]::UTF8)
+            New-LinkedDirectory $srcDir (Join-Path $runtime 'data')
+            if([IO.File]::ReadAllText((Join-Path $runtime 'data\dirprobe.txt')) -ne 'exfat-dir'){throw 'exFAT directory staging failed'}
+            Write-Host 'PROMOTION_EXFAT_GATE=PASS'
+          }
+          finally {
+            Remove-Item -LiteralPath 'C:\A8P_Issue78_Promote_State' -Recurse -Force -ErrorAction SilentlyContinue
+            $detach = @(
+              ('select vdisk file="{0}"' -f $vhd),
+              'detach vdisk'
+            ) -join [Environment]::NewLine
+            [IO.File]::WriteAllText($diskpart,$detach,[Text.Encoding]::ASCII)
+            diskpart /s $diskpart | Write-Host
+            Remove-Item -LiteralPath $vhd -Force -ErrorAction SilentlyContinue
+          }
+
+          foreach($name in @('AotR 8P WotR Mod.exe','manifest.json','repair-manifest.json','payload_ui.big','payload_paper.inc')){
+            Copy-Item -LiteralPath (Join-Path $package $name) -Destination (Join-Path (Get-Location) $name) -Force
+          }
+
+          $checkpoint = @(
+            '# Release checkpoint — 1.1.4',
+            '',
+            '- Distribution: GitHub update channel only; no new ModDB package.',
+            '- Issue: #78 external/exFAT runtime filesystem compatibility.',
+            '- Launcher SHA256: `' + $exeHash + '`',
+            '- Launcher size: `' + $exeSize + '` bytes',
+            '- Defender: `SCANNED_CLEAN`',
+            '- Real exFAT virtual-disk gate: `PASS`',
+            '- UI payload SHA256: `827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376`',
+            '- Paper payload SHA256: `3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43`',
+            '- FINAL_STABLE_V7 SHA256: `72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2`',
+            '- V7 shellcode SHA256: `60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A`',
+            '',
+            'The promoted public EXE is the exact binary that passed the Defender and exFAT gates in this promotion job.'
+          ) -join [Environment]::NewLine
+          [IO.File]::WriteAllText('docs/RELEASE_CHECKPOINT_1.1.4.md',$checkpoint + [Environment]::NewLine,(New-Object Text.UTF8Encoding($false)))
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f '.github/workflows/verify-issue78-exfat-once.yml'
+          git rm -f '.github/workflows/promote-1.1.4-issue78-once.yml'
+          git add -- 'AotR 8P WotR Mod.exe' 'manifest.json' 'repair-manifest.json' 'payload_ui.big' 'payload_paper.inc' 'docs/RELEASE_CHECKPOINT_1.1.4.md'
+          git commit -m "Promote launcher 1.1.4 issue 78 hotfix"
+          git push origin HEAD:hotfix/external-drive-link-fallback
+
+          Write-Host "PROMOTED_EXE_SHA256=$exeHash"
+          Write-Host "PROMOTED_EXE_SIZE=$exeSize"
