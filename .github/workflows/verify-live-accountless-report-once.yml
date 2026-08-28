@@ -1,0 +1,88 @@
+name: Verify live accountless report once
+
+on:
+  push:
+    branches:
+      - release/1.1.3
+    paths:
+      - .github/workflows/verify-live-accountless-report-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify public Vercel health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/health.json -w '%{http_code}' https://a8p-direct-report.vercel.app/api/report)
+          cat /tmp/health.json
+          test "$code" = "200"
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/health.json'))
+          assert d.get('ok') is True
+          assert d.get('service') == 'a8p-direct-report'
+          PY
+
+      - name: Submit accountless synthetic report with no GitHub credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/report.json <<'JSON'
+          {
+            "schema": 1,
+            "title": "Synthetic live accountless verification 2026-08-28",
+            "exact_error": "Synthetic verification only. No game files were modified.",
+            "support_bundle": {
+              "schema": 1,
+              "launcher_version": "1.1.3",
+              "error_code": "A8P-VERIFY-001",
+              "fingerprint": "A8P-FP-082805250001",
+              "timestamp": "2026-08-28T06:05:00Z",
+              "windows": "synthetic-ci",
+              "aotr_version": "synthetic",
+              "language": "en",
+              "files": [],
+              "repair_plan": {"source_error_code":"A8P-VERIFY-001","actions":["retry_launch"]},
+              "repair_attempts": [{"timestamp":"2026-08-28T06:05:00Z","action":"retry_launch","result":"failed","detail":"synthetic verification"}],
+              "last_retry": "2026-08-28T06:05:00Z",
+              "last_error": "Synthetic verification only. No game files were modified.",
+              "log_files": []
+            }
+          }
+          JSON
+          code=$(curl -sS -o /tmp/result.json -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/report.json \
+            https://a8p-direct-report.vercel.app/api/report)
+          cat /tmp/result.json
+          test "$code" = "201"
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/result.json'))
+          assert d.get('ok') is True
+          assert isinstance(d.get('issue_number'), int) and d['issue_number'] > 0
+          assert d.get('fingerprint') == 'A8P-FP-082805250001'
+          assert d.get('issue_url','').startswith('https://github.com/eliaauditore/AotR-8P-WotR/issues/')
+          print('ACCOUNTLESS_ISSUE_NUMBER='+str(d['issue_number']))
+          print('ACCOUNTLESS_ISSUE_URL='+d['issue_url'])
+          PY
+
+      - name: Verify GitHub fallback routes resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Repository issue creation route used by OPEN GITHUB fallback.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' 'https://github.com/eliaauditore/AotR-8P-WotR/issues/new?template=launcher-auto-report.md')
+          case "$code" in
+            200|302|303) ;;
+            *) echo "Unexpected GitHub issue-create route status: $code"; exit 1;;
+          esac
+          # Public repository itself must resolve.
+          code2=$(curl -sS -o /dev/null -w '%{http_code}' 'https://github.com/eliaauditore/AotR-8P-WotR')
+          test "$code2" = "200"
+          echo "FALLBACK_ROUTES_OK"
