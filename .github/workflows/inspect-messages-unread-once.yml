@@ -15,7 +15,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Extract and inspect embedded GUI
+      - name: Trace exact embedded support registration flow
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -26,12 +26,15 @@ jobs:
           $gui=Join-Path $env:RUNNER_TEMP 'launcher_gui_115.ps1'
           try{$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
           $lines=Get-Content -LiteralPath $gui
-          $patterns=@('SupportStatePath','StateRoot','GitHubApiRoot','HttpClient','function Get-HttpText','function Load-SupportState','function Register-SupportFingerprint','function Resolve-MasterIssue','function Get-MaintainerMessages','function Refresh-SupportMessages','$Window.Add_ContentRendered')
+          $patterns=@('Register-SupportFingerprint','LastFingerprint =','LastFingerprint=','LastDirectReportFingerprint','function Send-Direct','function Submit-Direct','function Invoke-Direct','PostAsync($endpoint','Invoke-Preflight','Clear-Last','ReportReady =','SupportState["fingerprint"]')
+          $printed=@{}
           for($i=0;$i -lt $lines.Count;$i++){
             $hit=$false
-            foreach($p in $patterns){if($lines[$i] -match [regex]::Escape($p)){$hit=$true;break}}
+            foreach($p in $patterns){if($lines[$i].IndexOf($p,[StringComparison]::OrdinalIgnoreCase) -ge 0){$hit=$true;break}}
             if($hit){
-              $a=[Math]::Max(0,$i-10);$b=[Math]::Min($lines.Count-1,$i+28)
+              $a=[Math]::Max(0,$i-18);$b=[Math]::Min($lines.Count-1,$i+34)
+              $key="$a-$b"
+              if($printed.ContainsKey($key)){continue};$printed[$key]=$true
               Write-Host "===== CONTEXT $($i+1) ====="
               for($j=$a;$j -le $b;$j++){Write-Host (('{0,5}: {1}' -f ($j+1),$lines[$j]))}
             }
