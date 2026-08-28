@@ -21,6 +21,15 @@ function Require-Admin {
     }
 }
 
+function Invoke-PktMonCleanup {
+    # pktmon emits "packet monitor is not running" on stderr when there is
+    # nothing to stop. Under PowerShell 7 + ErrorActionPreference=Stop that
+    # harmless native stderr becomes a terminating NativeCommandError.
+    # Run cleanup through cmd.exe so an already-stopped monitor is idempotent.
+    & cmd.exe /d /c 'pktmon stop >nul 2>&1' | Out-Null
+    & cmd.exe /d /c 'pktmon filter remove >nul 2>&1' | Out-Null
+}
+
 Require-Admin
 if (-not (Get-Command pktmon.exe -ErrorAction SilentlyContinue)) {
     throw 'pktmon.exe was not found on this Windows installation.'
@@ -34,9 +43,8 @@ $etl = Join-Path $OutDir ("AOTR_JOIN_PKTTRACE_{0}.etl" -f $Label)
 $txt = Join-Path $OutDir ("AOTR_JOIN_PKTTRACE_{0}.txt" -f $Label)
 
 if ($Mode -eq 'Start') {
-    # Clean up only pktmon state from an earlier run.
-    & pktmon stop 2>$null | Out-Null
-    & pktmon filter remove 2>$null | Out-Null
+    # Idempotent cleanup of any earlier pktmon session/filter state.
+    Invoke-PktMonCleanup
 
     foreach ($port in 8086..8093) {
         $name = "AOTR_$port"
@@ -69,12 +77,13 @@ if ($Mode -eq 'Start') {
 }
 
 & pktmon stop | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'pktmon stop failed.' }
 if (-not (Test-Path -LiteralPath $etl)) {
     throw "Expected ETL not found: $etl"
 }
 & pktmon etl2txt $etl --out $txt --brief --hex | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'pktmon etl2txt failed.' }
-& pktmon filter remove 2>$null | Out-Null
+& cmd.exe /d /c 'pktmon filter remove >nul 2>&1' | Out-Null
 
 Write-Host '============================================================'
 Write-Host ' AOTR WOTR NATIVE JOIN PACKET TRACE'
