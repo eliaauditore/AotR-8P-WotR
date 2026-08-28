@@ -106,7 +106,7 @@ function Reset-PortableRuntime {
 
 def replace_function(text: str, name: str, replacement: str) -> str:
     pattern = rf"(?ms)^function\s+{re.escape(name)}\b.*?^}}\s*\n"
-    text2, count = re.subn(pattern, replacement + "\n", text, count=1)
+    text2, count = re.subn(pattern, lambda _match: replacement + "\n", text, count=1)
     if count != 1:
         raise SystemExit(f"expected exactly one function {name}, found {count}")
     return text2
