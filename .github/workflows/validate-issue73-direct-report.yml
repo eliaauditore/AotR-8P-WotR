@@ -86,7 +86,7 @@ jobs:
           Write-Host 'ISSUE73_ENGINE_V7_IMMUTABILITY_GATE=PASS'
           Write-Host 'ISSUE73_NO_CLIENT_SECRET_GATE=PASS'
 
-      - name: Validate backend contract without GitHub credential
+      - name: Validate backend contract and live endpoint configuration
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -124,9 +124,10 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Backend blackbox gate failed'}
 
           $cfg=Get-Content -LiteralPath .\direct-report.json -Raw | ConvertFrom-Json
-          if([bool]$cfg.enabled){throw 'Production config enabled before live backend acceptance'}
-          if(-not [string]::IsNullOrWhiteSpace([string]$cfg.endpoint)){throw 'Disabled production config contains endpoint'}
-          Write-Host 'ISSUE73_DISABLED_UNTIL_LIVE_GATE=PASS'
+          if(-not [bool]$cfg.enabled){throw 'Production direct-report config is not enabled after live E2E acceptance'}
+          if([string]$cfg.endpoint -ne 'https://a8p-direct-report.vercel.app/api/report'){throw ('Unexpected production direct-report endpoint: '+[string]$cfg.endpoint)}
+          if(-not ([string]$cfg.endpoint).StartsWith('https://',[StringComparison]::OrdinalIgnoreCase)){throw 'Production direct-report endpoint is not HTTPS'}
+          Write-Host 'ISSUE73_LIVE_ENDPOINT_GATE=PASS'
 
       - name: Record exact candidate identities
         shell: powershell
