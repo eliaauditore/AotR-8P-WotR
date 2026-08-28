@@ -38,6 +38,10 @@ $SourceTemplateV25 = Join-Path $Work "launcher_v25.cs"
     (Join-Path $RepoRoot "launcher-source\v20\launcher.cs") `
     $SourceTemplateV25
 if ($LASTEXITCODE -ne 0) { throw "Issue84 transient-session transform failed" }
+& $Python `
+    (Join-Path $PSScriptRoot "apply_issue84_session_runtime_hardening.py") `
+    (Join-Path $Resources "launcher_engine.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Issue84 session hardening transform failed" }
 '@
 $text = Replace-Once $text $oldTransform $newTransform 'session transform invocation'
 $text = Replace-Once $text '$SourceTemplate = Join-Path $RepoRoot "launcher-source\v20\launcher.cs"' '$SourceTemplate = $SourceTemplateV25' 'C# source template redirect'
@@ -50,6 +54,8 @@ if ($engineText -notmatch 'AOTR8P_SESSION_') { throw "Issue84 session runtime na
 if ($engineText -notmatch 'AOTR8P_SESSION\.json') { throw "Issue84 runtime marker missing" }
 if ($engineText -notmatch '--cleanup-runtime') { throw "Issue84 engine cleanup watcher missing" }
 if ($engineText -notmatch [regex]::Escape('runtime\sessions')) { throw "Issue84 local session root missing" }
+if ($engineText -notmatch 'Write-AotR8PSessionMarker') { throw "Issue84 prelaunch marker writer missing" }
+if ($engineText -match [regex]::Escape('Join-Path $runtimeStageRoot ("_AOTR_8P_WOTR_RUNTIME_V4_" + $PID)')) { throw "Issue84 legacy V4 runtime creation remains" }
 if ($guiText -notmatch '--cleanup-runtime') { throw "Issue84 Auto-Repair transient cleanup helper missing" }
 if ($guiText -match [regex]::Escape('Move-Item -LiteralPath $runtimePath -Destination $quarantine')) { throw "Issue84 persistent quarantine move remains" }
 if ($guiText -match [regex]::Escape('$leaf + "_REPAIR_"')) { throw "Issue84 persistent REPAIR name construction remains" }
