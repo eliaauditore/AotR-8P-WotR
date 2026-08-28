@@ -31,9 +31,9 @@ foreach ($required in @('TEST_VALID_FOR_STATE8','WATCHER_CLEAN_EXIT','JOIN_STATE
         throw "Source log is not marked $required=YES."
     }
 }
-$pidMatch = [regex]::Match($raw, '(?m)^Game PID\s+:\s+(\d+)\s*$')
-if (-not $pidMatch.Success) { throw 'Could not parse Game PID from source log.' }
-$GamePid = [int]$pidMatch.Groups[1].Value
+$pidMatches = [regex]::Matches($raw, '(?m)^Game PID\s+:\s+(\d+)\s*$')
+if ($pidMatches.Count -ne 1) { throw "Expected exactly one Game PID in source log; found $($pidMatches.Count)." }
+$GamePid = [int]$pidMatches[0].Groups[1].Value
 
 # Parse only callback-bound owner records. Do not consume unrelated ECX_OWNER snapshots.
 $records = New-Object System.Collections.Generic.List[object]
@@ -65,7 +65,9 @@ if ($p.ExecutablePath -ine $GameDat) { throw "PID $GamePid path mismatch: $($p.E
 $proc=Get-Process -Id $GamePid -ErrorAction Stop
 $moduleBase=[uint32]$proc.MainModule.BaseAddress.ToInt64()
 $moduleSize=[uint32]$proc.MainModule.ModuleMemorySize
-$moduleEnd=[uint64]$moduleBase+[uint64]$moduleSize
+$moduleEnd64=[uint64]$moduleBase+[uint64]$moduleSize
+if ($moduleEnd64 -gt 0x7FFFFFFF) { throw ('Unexpected 32-bit module end above user-space ceiling: 0x{0:X}' -f $moduleEnd64) }
+$moduleEnd=[uint32]$moduleEnd64
 
 if (-not ('AotrOwnerProvRead' -as [type])) {
 Add-Type -TypeDefinition @'
@@ -105,12 +107,6 @@ public static class AotrOwnerProvRead {
         UInt32 p=m.Protect&0xFFu;
         if((m.Protect&PAGE_GUARD)!=0 || p==0 || p==PAGE_NOACCESS) return false;
         return true;
-    }
-    public static UInt32 ReadU32(UInt32 pid,UInt32 addr) {
-        IntPtr h=OpenProcess(PROCESS_VM_READ|PROCESS_QUERY_INFORMATION,false,pid);
-        if(h==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-        try { byte[] b=new byte[4]; IntPtr g; if(!ReadProcessMemory(h,new IntPtr((long)addr),b,new IntPtr(4),out g)||g.ToInt64()!=4) throw new Exception("ReadU32 failed at 0x"+addr.ToString("X8")); return BitConverter.ToUInt32(b,0); }
-        finally { CloseHandle(h); }
     }
     public static byte[] ReadBytes(UInt32 pid,UInt32 addr,Int32 count) {
         IntPtr h=OpenProcess(PROCESS_VM_READ|PROCESS_QUERY_INFORMATION,false,pid);
@@ -181,8 +177,7 @@ Write-Host ("Proven owner     : 0x{0:X8}" -f $Owner)
 Write-Host ("game.dat module  : 0x{0:X8} .. 0x{1:X8} size=0x{2:X}" -f $moduleBase,$moduleEnd,$moduleSize)
 Write-Host ''
 
-# First, the high-value search: exact owner pointer stored anywhere inside game.dat image memory.
-$moduleHits=[AotrOwnerProvRead]::Scan([uint32]$GamePid,$Owner,$moduleBase,[uint32]$moduleEnd,$MaxHits)
+$moduleHits=[AotrOwnerProvRead]::Scan([uint32]$GamePid,$Owner,$moduleBase,$moduleEnd,$MaxHits)
 Write-Host ("MODULE_DIRECT_OWNER_POINTER_HITS={0}" -f $moduleHits.Count)
 $idx=0
 foreach($h in $moduleHits) {
@@ -192,7 +187,6 @@ foreach($h in $moduleHits) {
 }
 Write-Host ''
 
-# Then scan all readable committed user-space regions. This classifies heap/manager fields if no static slot exists.
 $allHits=[AotrOwnerProvRead]::Scan([uint32]$GamePid,$Owner,0,[uint32]0x7FFFFFFF,$MaxHits)
 Write-Host ("ALL_DIRECT_OWNER_POINTER_HITS={0}" -f $allHits.Count)
 $grouped=$allHits|Group-Object Type|Sort-Object Count -Descending
@@ -203,7 +197,7 @@ $show=@($allHits|Select-Object -First 48)
 $idx=0
 foreach($h in $show) {
     $idx++
-    $inModule=([uint64]$h.Address -ge [uint64]$moduleBase -and [uint64]$h.Address -lt $moduleEnd)
+    $inModule=([uint64]$h.Address -ge [uint64]$moduleBase -and [uint64]$h.Address -lt [uint64]$moduleEnd)
     Write-Host ("HIT #{0}: addr=0x{1:X8} region=0x{2:X8} alloc=0x{3:X8} type={4} inGameModule={5}" -f $idx,$h.Address,$h.RegionBase,$h.AllocationBase,(Type-Name $h.Type),$inModule)
     Dump-HitContext $h
 }
