@@ -83,14 +83,17 @@ jobs:
           foreach($name in $managed){if(Test-Path -LiteralPath (Join-Path $root $name)){throw "managed folder survived: $name"}}
           foreach($name in $unmanaged){if(-not(Test-Path -LiteralPath (Join-Path $root $name))){throw "unmanaged folder was deleted: $name"}}
 
-          $ntfs=Join-Path $env:RUNNER_TEMP 'issue84-ntfs-sim'
-          Remove-Item -LiteralPath $ntfs -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path (Join-Path $ntfs '_AOTR_8P_WOTR_RUNTIME') | Out-Null
-          $removedNtfs=Remove-AotR8PLegacyRuntimeFolders $ntfs 'NTFS'
-          if($removedNtfs -ne 0){throw "NTFS guard returned $removedNtfs"}
-          if(-not(Test-Path -LiteralPath (Join-Path $ntfs '_AOTR_8P_WOTR_RUNTIME'))){throw 'NTFS guard deleted runtime'}
+          foreach($format in @('NTFS','ReFS','UNKNOWN')){
+            $guardRoot=Join-Path $env:RUNNER_TEMP ("issue84-guard-"+$format)
+            Remove-Item -LiteralPath $guardRoot -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path (Join-Path $guardRoot '_AOTR_8P_WOTR_RUNTIME') | Out-Null
+            $removedGuard=Remove-AotR8PLegacyRuntimeFolders $guardRoot $format
+            if($removedGuard -ne 0){throw "$format guard returned $removedGuard"}
+            if(-not(Test-Path -LiteralPath (Join-Path $guardRoot '_AOTR_8P_WOTR_RUNTIME'))){throw "$format guard deleted runtime"}
+            Remove-Item -LiteralPath $guardRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
 
-          Remove-Item -LiteralPath $root,$ntfs -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host 'ISSUE84_GUARDED_CLEANUP_TEST=PASS'
 
       - name: Verify candidate identity and hosted Defender
