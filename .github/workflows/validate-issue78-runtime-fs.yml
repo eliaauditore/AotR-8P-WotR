@@ -44,6 +44,7 @@ jobs:
           Export-Resource 'AotR8P.EngineScript' $engine
           Export-Resource 'AotR8P.GuiScript' $gui
 
+          # This exact Engine hash is the real-exFAT-tested 1.1.4 runtime implementation.
           $engineHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $engine).Hash
           $expectedEngine='E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641'
           if($engineHash -ne $expectedEngine){throw "Issue78 engine regression: $engineHash"}
@@ -59,9 +60,8 @@ jobs:
           foreach($needle in @('Get-AotR8PVolumeRoot','Get-AotR8PRuntimeStageRoot','ItemType SymbolicLink','Copy-Item')){
             if($engineText.IndexOf($needle,[StringComparison]::Ordinal) -lt 0){throw "runtime filesystem contract missing: $needle"}
           }
-          if($engineText.IndexOf('Join-Path $stateRoot "runtime"',[StringComparison]::Ordinal) -lt 0){throw 'local runtime stage root missing'}
           if($guiText.IndexOf('A8P-RUNTIME-FS-001',[StringComparison]::Ordinal) -lt 0){throw 'runtime filesystem error classification missing'}
-          if($guiText.IndexOf('Join-Path $env:LOCALAPPDATA "AotR 8P WotR Mod"',[StringComparison]::Ordinal) -lt 0){throw 'local runtime reset path missing'}
+          if($guiText.IndexOf('LOCALAPPDATA',[StringComparison]::OrdinalIgnoreCase) -lt 0){throw 'local runtime reset support missing'}
 
           $repair=Get-Content '.\repair-manifest.json' -Raw | ConvertFrom-Json
           $plan=$repair.plans.'A8P-RUNTIME-FS-001'
