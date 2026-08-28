@@ -70,20 +70,46 @@ The normalized VM SHA-256 is exactly the Host SHA-256. Therefore there is no add
 
 ## Controlled A/B preparation
 
-The VM source-path file:
+The VM PlayerTemplate copies were synchronized by removing only the 22 proven comment characters.
 
-`C:\AgeoftheRing\aotr\data\ini\playertemplate.ini`
+Post-sync evidence for both VM locations:
 
-was patched by removing only the 22 proven comment characters.
-
-Post-patch evidence:
-
+- `C:\AgeoftheRing\aotr\data\ini\playertemplate.ini`
+- `C:\AgeoftheRing\_AOTR_8P_WOTR_RUNTIME\data\ini\playertemplate.ini`
 - length: `33,211`
 - SHA-256: `2D162EE705DE9D96A7B65140C22EBA6EBD0B8F155AE062C97F9884E37DC59F4D`
 
-This proves that this VM copy is now byte-identical to Host.
+Both active/source VM copies are therefore byte-identical to Host for this file.
 
-The mirrored VM runtime-path copy under `_AOTR_8P_WOTR_RUNTIME\data\ini\playertemplate.ini` must still be re-hashed before the runtime A/B test. Do not claim complete runtime synchronization until the actually loaded copy/copies are confirmed identical.
+## Runtime A/B result after PlayerTemplate sync
+
+The existing read-only `AOTR_WOTR_B04_RUNTIME_COMPONENT_SPLIT.ps1` probe was rerun with Host and VM in the same WotR network state after the PlayerTemplate sync.
+
+Host:
+
+- `B04 = 0xD0B40E9B`
+- `component A = 0x792B9B94`
+- `component B = 0x57887307`
+- `B38 = 0x000EFFF1`
+- `LISTCOUNT = 8`
+- `FLAG = 0`
+- `ACC = 0x00000008`
+
+VM:
+
+- `B04 = 0xD0B40E9B`
+- `component A = 0x792B9B94`
+- `component B = 0x57887307`
+- `B38 = 0x000EFFF1`
+- `LISTCOUNT = 8`
+- `FLAG = 0`
+- `ACC = 0x00000008`
+
+The complete comparison keys are identical:
+
+`B04=D0B40E9B;A=792B9B94;B=57887307;B38=000EFFF1;LISTCOUNT=8;FLAG=0;ACC=00000008`
+
+Before this file correction, runtime had already proven component B equal while component A differed between Host and VM. After changing only the proven PlayerTemplate delta, component A now equals Host and therefore B04 equals Host as well.
 
 ## Classification
 
@@ -94,24 +120,28 @@ The mirrored VM runtime-path copy under `_AOTR_8P_WOTR_RUNTIME\data\ini\playerte
 - The complete byte delta inside `playertemplate.ini` is exactly 22 semicolons.
 - Those semicolons comment out `StartingUnit3 = PvPModePing` and its zero offset in 11 PlayerTemplate blocks on VM while Host has them active.
 - Removing only those 22 semicolons produces the exact Host file length and SHA-256.
-- The VM `aotr\data\ini\playertemplate.ini` source-path copy has now been patched to the exact Host SHA-256.
+- Both VM PlayerTemplate copies are now byte-identical to Host.
+- Before correction, component B matched while component A differed between Host and VM.
+- After changing only PlayerTemplate, Host and VM have identical component A, component B, B04, B38 and associated component-B object state.
+- Therefore this A/B experiment closes the causal links `playertemplate.ini mismatch -> Component-A mismatch -> B04 mismatch` for the tested state.
 
 ### STARKER HINWEIS
 
-The exact file delta explains the previously observed serializer sequence shift: Host serializes `StartingUnit3/PvPModePing` where VM skips those commented directives and reaches later `StartingUnit*` entries first.
+The exact file delta explains the previously observed serializer sequence shift: Host serializes `StartingUnit3/PvPModePing` where the old VM file skipped those commented directives and reached later `StartingUnit*` entries first.
 
-This makes `playertemplate.ini mismatch -> Component-A mismatch -> B04 mismatch -> PATH_C Reason4` the leading causal chain, but the lower links remain unproven until the controlled rerun.
+The remaining leading chain is now narrowed to:
+
+`PlayerTemplate mismatch -> Component-A mismatch -> B04 mismatch` **BEWIESEN**, followed by `B04 mismatch -> PATH_C Reason4 reject` still requiring the controlled native join rerun.
 
 ### HYPOTHESE still to test
 
-- Correcting the actually loaded VM PlayerTemplate copy/copies will make Component-A match Host.
-- Matching Component-A will make B04 match.
-- Matching B04 will remove the prior `PATH_C Reason4` reject.
+- With B04 now matching, the prior PATH_C Reason4 reject will disappear.
+- If the join still fails, either a different PATH_C predicate fires or a later validation/state transition remains divergent.
 
 ## Next gate
 
-1. Hash both VM PlayerTemplate locations after the source-path patch.
-2. Ensure the actually loaded runtime copy is the Host SHA-256 without changing any unrelated file.
-3. Rerun the same Component-A/B04 capture.
-4. Retry the native ID3 join.
-5. Record whether `PATH_C Reason4` disappears or persists.
+1. Keep all files unchanged.
+2. Perform exactly one controlled native ID3 join from VM using the existing `AOTR_WOTR_NATIVE_JOIN_CALL_POC.ps1`.
+3. Observe whether Host returns the prior ID5/Reason4 failure or reaches the ID4 success/Type6 slot-commit path.
+4. Record `session+0x44`, slot mutation, direct response class and, if needed, the PATH_C branch reached.
+5. If Reason4 disappears but another failure remains, investigate only that next branch.
