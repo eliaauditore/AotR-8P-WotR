@@ -1,0 +1,125 @@
+name: Build Launcher 1.1.7 Issue84 RC
+
+on:
+  push:
+    branches:
+      - hotfix/runtime-cleanup-1.1.7-rc
+    paths:
+      - 'launcher-source/v24/**'
+      - '.github/workflows/build-launcher-1-1-7-issue84-rc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build 1.1.7 Issue84 candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & '.\launcher-source\v24\BUILD_LAUNCHER_1_1_7_ISSUE84_CANDIDATE.ps1' -OutputRoot '.\_V24_1_1_7_BUILD'
+          if($LASTEXITCODE -ne 0){throw "V24 builder failed with exit code $LASTEXITCODE"}
+
+      - name: Validate exact Issue78 engine preservation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $engine='.\_V24_1_1_7_BUILD\work\resources\launcher_engine.ps1'
+          $gui='.\_V24_1_1_7_BUILD\work\resources\launcher_gui.ps1'
+          if(-not(Test-Path -LiteralPath $engine)){throw 'candidate engine missing'}
+          if(-not(Test-Path -LiteralPath $gui)){throw 'candidate GUI missing'}
+          $engineHash=(Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash
+          $expected='E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641'
+          if($engineHash -ne $expected){throw "Issue78 engine changed: $engineHash"}
+          foreach($path in @($engine,$gui)){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw "PS5.1 parse failure: $path :: $($errors[0].Message)"}
+          }
+          Write-Host "ISSUE78_ENGINE_PRESERVED=$engineHash"
+
+      - name: Unit-test guarded cleanup helper
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $gui=(Resolve-Path '.\_V24_1_1_7_BUILD\work\resources\launcher_gui.ps1').Path
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($gui,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw $errors[0].Message}
+          $fn=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Remove-AotR8PLegacyRuntimeFolders'},$true))
+          if($fn.Count -ne 1){throw "cleanup helper count=$($fn.Count)"}
+          $fnFile=Join-Path $env:RUNNER_TEMP 'issue84-helper.ps1'
+          [IO.File]::WriteAllText($fnFile,$fn[0].Extent.Text,(New-Object Text.UTF8Encoding($false)))
+          function Write-RepairLog([string]$Message){Write-Host $Message}
+          . $fnFile
+
+          $root=Join-Path $env:RUNNER_TEMP 'issue84-exfat-sim'
+          Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $managed=@(
+            '_AOTR_8P_WOTR_RUNTIME',
+            '_AOTR_8P_WOTR_RUNTIME_V4_3244',
+            '_AOTR_8P_WOTR_RUNTIME_REPAIR_20260828_070600_1',
+            '_AOTR_8P_WOTR_RUNTIME_V4_4532_REPAIR_20260828_071100_2'
+          )
+          $unmanaged=@(
+            '_AOTR_8P_WOTR_RUNTIME_NOTOURS',
+            '_AOTR_8P_WOTR_RUNTIME_V4_NOTPID',
+            'AgeoftheRing',
+            'user-folder'
+          )
+          foreach($name in @($managed+$unmanaged)){
+            $p=Join-Path $root $name
+            New-Item -ItemType Directory -Force -Path $p | Out-Null
+            [IO.File]::WriteAllText((Join-Path $p 'probe.txt'),'probe')
+          }
+          $removed=Remove-AotR8PLegacyRuntimeFolders $root 'exFAT'
+          if($removed -ne $managed.Count){throw "exFAT cleanup removed $removed, expected $($managed.Count)"}
+          foreach($name in $managed){if(Test-Path -LiteralPath (Join-Path $root $name)){throw "managed folder survived: $name"}}
+          foreach($name in $unmanaged){if(-not(Test-Path -LiteralPath (Join-Path $root $name))){throw "unmanaged folder was deleted: $name"}}
+
+          $ntfs=Join-Path $env:RUNNER_TEMP 'issue84-ntfs-sim'
+          Remove-Item -LiteralPath $ntfs -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path (Join-Path $ntfs '_AOTR_8P_WOTR_RUNTIME') | Out-Null
+          $removedNtfs=Remove-AotR8PLegacyRuntimeFolders $ntfs 'NTFS'
+          if($removedNtfs -ne 0){throw "NTFS guard returned $removedNtfs"}
+          if(-not(Test-Path -LiteralPath (Join-Path $ntfs '_AOTR_8P_WOTR_RUNTIME'))){throw 'NTFS guard deleted runtime'}
+
+          Remove-Item -LiteralPath $root,$ntfs -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host 'ISSUE84_GUARDED_CLEANUP_TEST=PASS'
+
+      - name: Verify candidate identity and hosted Defender
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\_V24_1_1_7_BUILD\package\AotR 8P WotR Mod.exe').Path
+          $fvi=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+          if($fvi.ProductVersion -ne '1.1.7'){throw "ProductVersion=$($fvi.ProductVersion)"}
+          $hash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          Write-Host "ISSUE84_RC_EXE_SHA256=$hash"
+
+          $mp=@(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if(-not $mp){throw 'Windows Defender MpCmdRun.exe unavailable'}
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          $code=$LASTEXITCODE
+          if($code -ne 0){throw "Hosted Defender scan exit=$code"}
+          Write-Host 'ISSUE84_HOSTED_DEFENDER=PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-1.1.7-Issue84-RC
+          path: |
+            _V24_1_1_7_BUILD/package/**
+            _V24_1_1_7_BUILD/SHA256SUMS.json
+            _V24_1_1_7_BUILD/*.zip
+            _V24_1_1_7_BUILD/*.sha256.txt
+            _V24_1_1_7_BUILD/DEFENDER_SCAN.txt
+          if-no-files-found: error
