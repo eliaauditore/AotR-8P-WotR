@@ -1,18 +1,18 @@
 param(
     [string]$GameDat = 'D:\Games\AotR\AgeoftheRing\rotwk\game.dat',
-    [uint32]$AnchorVA = 0x00787C44,
+    [uint32]$AnchorVA = 0x00787C54,
     [uint32]$StopVA   = 0x00787CFD,
-    [int]$BackScan    = 0x1000
+    [int]$BackScan    = 0x2000
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # DISK ONLY / READ ONLY.
-# Alignment-safe trace for the 0x00787CA3 Network-GameInfo constructor caller.
-# The previous generic range trace can start in the middle of an x86 instruction.
-# This probe finds the nearest preceding CC padding run, starts after it, and
-# disassembles forward across the known aligned anchor at 0x00787C44.
+# Robust function-start recovery for the 0x00787CA3 Network-GameInfo ctor caller.
+# Does NOT assume CC padding. It scans backward for plausible MSVC x86 prologues,
+# disassembles each candidate forward, and accepts only candidates whose instruction
+# boundaries match several already-proven addresses in this function.
 
 $ExpectedHash = 'CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC'
 
@@ -28,7 +28,7 @@ $pyPath = $py.Source
 & $pyPath -c "import capstone" 2>$null
 if ($LASTEXITCODE -ne 0) { throw ('Python capstone missing. Install with: "{0}" -m pip install --user capstone' -f $pyPath) }
 
-$tempPy = Join-Path $env:TEMP ('a8p_resync_' + [guid]::NewGuid().ToString('N') + '.py')
+$tempPy = Join-Path $env:TEMP ('a8p_resync2_' + [guid]::NewGuid().ToString('N') + '.py')
 try {
 @'
 import sys, struct
@@ -70,54 +70,96 @@ def raw_to_va(raw):
 
 anchor_raw=va_to_raw(anchor)
 scan_raw=max(0,anchor_raw-back)
-# Find nearest preceding padding run of at least two CC bytes.
-last=None
-i=scan_raw
-while i < anchor_raw-1:
-    if data[i] == 0xCC:
-        j=i
-        while j < anchor_raw and data[j] == 0xCC:
-            j+=1
-        if j-i >= 2:
-            last=(i,j)
-        i=j
-    else:
-        i+=1
-
-if not last:
-    raise SystemExit(f'No >=2-byte CC padding run found in 0x{back:X} bytes before anchor')
-
-pad0,pad1=last
-start_raw=pad1
-start_va=raw_to_va(start_raw)
 stop_raw=va_to_raw(stop-1)+1
-code=data[start_raw:stop_raw]
+
+# Already-proven instruction boundaries from the previous correctly aligned trace.
+required = {
+    0x00787C54: 'lea',
+    0x00787C90: 'call',
+    0x00787CA3: 'call',
+    0x00787CD9: 'mov',
+    0x00787CFA: 'ret',
+}
+
+# Candidate starts. Strong MSVC patterns first, then standard frame/SEH starts.
+candidates=set()
+for r in range(scan_raw, anchor_raw):
+    # Common MSVC stack-probe prologue used by nearby functions:
+    #   B8 imm32 ; E8 rel32 ; 81 EC imm32
+    if r+16 <= len(data) and data[r] == 0xB8 and data[r+5] == 0xE8 and data[r+10:r+12] == b'\x81\xEC':
+        candidates.add(r)
+    # Standard frame prologue.
+    if r+3 <= len(data) and data[r:r+3] == b'\x55\x8B\xEC':
+        candidates.add(r)
+    # MSVC SEH-style start.
+    if r+6 <= len(data) and data[r:r+6] == b'\x64\xA1\x00\x00\x00\x00':
+        candidates.add(r)
 
 md=Cs(CS_ARCH_X86,CS_MODE_32)
 md.detail=False
-ins=list(md.disasm(code,start_va))
-if not ins:
-    raise SystemExit('No instructions decoded from resynchronized start')
 
-# Require the known aligned anchor to be an instruction boundary or to fall after
-# a complete instruction stream that reaches it exactly.
-boundaries={x.address for x in ins}
-if anchor not in boundaries:
-    # 0x787C44 is expected to be LEA EAX,[EBP+0xD4]. If padding choice was wrong,
-    # fail rather than silently present a misaligned stream.
-    raise SystemExit(f'Resync validation failed: anchor 0x{anchor:08X} is not an instruction boundary. Found start 0x{start_va:08X}.')
+valid=[]
+for r in sorted(candidates):
+    sva=raw_to_va(r)
+    code=data[r:stop_raw]
+    ins=list(md.disasm(code,sva))
+    if not ins:
+        continue
+    byaddr={x.address:x for x in ins}
+    ok=True
+    for va,mnem in required.items():
+        x=byaddr.get(va)
+        if x is None or x.mnemonic != mnem:
+            ok=False
+            break
+    if not ok:
+        continue
+
+    # Additional semantic checks at known sites.
+    if byaddr[0x00787CA3].op_str.lower() not in ('0x9035ae','0x009035ae'):
+        continue
+    if byaddr[0x00787C90].op_str.lower() not in ('0x42f6e0','0x0042f6e0'):
+        continue
+
+    score=0
+    first=ins[:8]
+    if first and first[0].mnemonic == 'mov' and first[0].op_str.lower().startswith('eax, 0x'):
+        score += 4
+    if any(x.mnemonic == 'call' for x in first[:3]):
+        score += 2
+    if any(x.mnemonic == 'sub' and x.op_str.lower().startswith('esp,') for x in first[:6]):
+        score += 3
+    if first and first[0].mnemonic == 'push' and first[0].op_str.lower() == 'ebp':
+        score += 3
+    if any(x.mnemonic == 'mov' and x.op_str.lower() in ('esi, ecx','edi, ecx') for x in ins[:20]):
+        score += 2
+
+    valid.append((score,sva,ins))
+
+if not valid:
+    print(f'No validated function-start candidate found in 0x{back:X} bytes before anchor 0x{anchor:08X}.')
+    print(f'Prologue-like raw candidates tested: {len(candidates)}')
+    raise SystemExit(2)
+
+# Prefer highest score; for ties choose the closest plausible prologue before anchor.
+valid.sort(key=lambda t:(t[0],t[1]), reverse=True)
+score,start_va,ins=valid[0]
 
 print('============================================================')
-print(' AOTR WOTR CALLER1 FUNCTION TRACE - ALIGNMENT SAFE')
+print(' AOTR WOTR CALLER1 FUNCTION TRACE - VALIDATED RESYNC V2')
 print('============================================================')
 print(f'Function start : 0x{start_va:08X}')
-print(f'CC padding     : 0x{raw_to_va(pad0):08X} - 0x{raw_to_va(pad1-1):08X}')
 print(f'Anchor         : 0x{anchor:08X}')
 print(f'Stop           : 0x{stop:08X}')
+print(f'Validated starts: {len(valid)} / {len(candidates)} candidates')
+print(f'Selected score : {score}')
 print('')
 
+# Only print selected function from start through known RET.
 lines=[]
 for x in ins:
+    if x.address > 0x00787CFA:
+        break
     b=' '.join(f'{v:02X}' for v in x.bytes)
     line=f'0x{x.address:08X}: {b:<32} {x.mnemonic:<8} {x.op_str}'
     lines.append(line)
@@ -127,12 +169,17 @@ print('\n================ KEY FLOW =================')
 for line in lines:
     l=line.lower()
     if ('esi' in l or 'edi' in l or '0x42f6e0' in l or '0x9035ae' in l or
-        '0x7871fc' in l or '[eax], edi' in l or '[eax],edi' in l):
+        '0x7871fc' in l or '[eax], edi' in l or '[eax],edi' in l or
+        'sub      esp' in l or 'sub     esp' in l):
         print(line)
+
+print('\n================ VALIDATED STARTS =================')
+for sc,sva,_ in valid[:10]:
+    print(f'0x{sva:08X} score={sc}')
 '@ | Set-Content -LiteralPath $tempPy -Encoding ASCII
 
     & $pyPath $tempPy $GameDat ('0x{0:X}' -f $AnchorVA) ('0x{0:X}' -f $StopVA) $BackScan
-    if ($LASTEXITCODE -ne 0) { throw 'Alignment-safe disassembly failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Validated resync disassembly failed.' }
 } finally {
     Remove-Item -LiteralPath $tempPy -Force -ErrorAction SilentlyContinue
 }
