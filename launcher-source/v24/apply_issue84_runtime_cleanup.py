@@ -5,7 +5,8 @@ import re
 GUI_RESET_RUNTIME = r'''function Remove-AotR8PLegacyRuntimeFolders([string]$InstallRoot, [string]$DriveFormat) {
     if ([string]::IsNullOrWhiteSpace($InstallRoot)) { return 0 }
     if ([string]::IsNullOrWhiteSpace($DriveFormat)) { return 0 }
-    if ($DriveFormat -ieq "NTFS") { return 0 }
+    $safeLegacyFormats = @("exFAT", "FAT32", "FAT")
+    if (-not ($safeLegacyFormats -contains $DriveFormat)) { return 0 }
     if (-not (Test-Path -LiteralPath $InstallRoot -PathType Container)) { return 0 }
 
     $removed = 0
@@ -20,7 +21,7 @@ GUI_RESET_RUNTIME = r'''function Remove-AotR8PLegacyRuntimeFolders([string]$Inst
         try {
             Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
             $removed++
-            Write-RepairLog ("Issue84 removed stale non-NTFS runtime folder: " + $item.FullName)
+            Write-RepairLog ("Issue84 removed stale exFAT/FAT runtime folder: " + $item.FullName)
         }
         catch {
             Write-RepairLog ("Issue84 stale runtime cleanup skipped: " + $item.FullName + " :: " + $_.Exception.Message)
@@ -45,11 +46,12 @@ function Reset-PortableRuntime {
         }
     }
 
-    # Issue84: once Issue78 redirects a non-NTFS/exFAT install to LOCALAPPDATA,
-    # every strictly named runtime folder left beside AotR is legacy. Remove
-    # only those known launcher-owned folders after stop_legacy_runtime /
-    # stop_failed_game have already run. Unknown filesystem state stays
-    # conservative and uses the existing quarantine behavior instead.
+    # Issue84: Issue78 redirects active runtime away from exFAT/FAT installs
+    # into LOCALAPPDATA. On those known non-reparse filesystems, strictly
+    # named runtime folders left beside AotR are legacy and can be removed
+    # after stop_legacy_runtime / stop_failed_game have already run.
+    # NTFS, ReFS, unknown and any other filesystem stay on the conservative
+    # quarantine path so recursive deletion is never broadened implicitly.
     $installDriveFormat = ""
     try {
         $installVolumeRoot = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Install.Root))
@@ -60,13 +62,15 @@ function Reset-PortableRuntime {
     }
     catch {}
 
-    $legacyExternalOnly = -not [string]::IsNullOrWhiteSpace($installDriveFormat) -and $installDriveFormat -ine "NTFS"
-    if ($legacyExternalOnly) {
+    $safeLegacyFormats = @("exFAT", "FAT32", "FAT")
+    $destructiveLegacyCleanup = $safeLegacyFormats -contains $installDriveFormat
+    if ($destructiveLegacyCleanup) {
         [void](Remove-AotR8PLegacyRuntimeFolders $Install.Root $installDriveFormat)
     }
     else {
-        # 1.1.3 and normal NTFS installs may stage beside AotR. Preserve the
-        # original quarantine path when the install volume is NTFS or unknown.
+        # Preserve the original quarantine path on NTFS, ReFS and unknown /
+        # unclassified filesystems. This avoids recursive deletion across
+        # possible reparse points or filesystem semantics we have not tested.
         $legacyPrimary = Join-Path $Install.Root "_AOTR_8P_WOTR_RUNTIME"
         $paths.Add($legacyPrimary)
         if (Test-Path -LiteralPath $Install.Root -PathType Container) {
@@ -118,9 +122,10 @@ def patch_gui(path: Path) -> None:
 
     required = [
         "Remove-AotR8PLegacyRuntimeFolders",
-        "Issue84 removed stale non-NTFS runtime folder",
+        "Issue84 removed stale exFAT/FAT runtime folder",
         "installDriveFormat",
-        "legacyExternalOnly",
+        "destructiveLegacyCleanup",
+        "safeLegacyFormats",
         "A8P-RUNTIME-FS-001",
         "LOCALAPPDATA",
     ]
