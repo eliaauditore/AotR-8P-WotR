@@ -30,7 +30,7 @@ jobs:
           create partition primary
           format fs=exfat quick label=A8PTEST
           assign letter=$letter
-"@
+          "@
           $diskpart=Join-Path $env:RUNNER_TEMP 'issue78-diskpart.txt'
           [IO.File]::WriteAllText($diskpart,$script,[Text.Encoding]::ASCII)
           diskpart /s $diskpart | Write-Host
@@ -84,7 +84,7 @@ jobs:
             $detach=@"
             select vdisk file="$vhd"
             detach vdisk
-"@
+            "@
             [IO.File]::WriteAllText($diskpart,$detach,[Text.Encoding]::ASCII)
             diskpart /s $diskpart | Write-Host
             Remove-Item -LiteralPath $vhd -Force -ErrorAction SilentlyContinue
