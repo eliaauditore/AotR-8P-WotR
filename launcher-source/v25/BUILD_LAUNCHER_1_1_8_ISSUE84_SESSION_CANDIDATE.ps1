@@ -46,6 +46,7 @@ if ($LASTEXITCODE -ne 0) { throw "Issue84 session hardening transform failed" }
 $text = Replace-Once $text $oldTransform $newTransform 'session transform invocation'
 $text = Replace-Once $text '$SourceTemplate = Join-Path $RepoRoot "launcher-source\v20\launcher.cs"' '$SourceTemplate = $SourceTemplateV25' 'C# source template redirect'
 $text = Replace-Once $text 'AotR_8P_War_of_the_Ring_1.1.4_Issue78_RC1.zip' 'AotR_8P_War_of_the_Ring_1.1.8_Issue84_SESSION_RC1.zip' 'RC zip name'
+$text = Replace-Once $text 'if ($engineText -notmatch [regex]::Escape(''Join-Path $stateRoot "runtime"'')) { throw "Local runtime root patch missing" }' 'if ($engineText -notmatch [regex]::Escape(''Join-Path $StateRoot "runtime\sessions"'')) { throw "Local runtime session root patch missing" }' 'inherited local runtime guard'
 
 $oldStatic = 'Write-Host "ISSUE78 STATIC CONTRACT PASS" -ForegroundColor Green'
 $newStatic = @'
