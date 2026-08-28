@@ -20,8 +20,10 @@ jobs:
           fetch-depth: 0
 
       - name: Activate production direct-report endpoint and permanent live gate
-        shell: python
+        shell: bash
         run: |
+          set -euo pipefail
+          python - <<'PY'
           import json
           from pathlib import Path
 
@@ -48,6 +50,7 @@ jobs:
           if old not in text:
               raise SystemExit('expected disabled-config gate not found')
           wf_path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Commit live activation
         shell: bash
