@@ -1,0 +1,38 @@
+name: Inspect 1.1.5 Messages Unread Once
+
+on:
+  push:
+    branches:
+      - hotfix/messages-unread-state
+    paths:
+      - '.github/workflows/inspect-messages-unread-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Extract and inspect embedded GUI
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\AotR 8P WotR Mod.exe').Path
+          $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+          $s=$asm.GetManifestResourceStream('AotR8P.GuiScript')
+          if(-not $s){throw 'GUI resource missing'}
+          $gui=Join-Path $env:RUNNER_TEMP 'launcher_gui_115.ps1'
+          try{$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
+          $lines=Get-Content -LiteralPath $gui
+          $patterns=@('last_seen','master_issue','unread','MESSAGES','message_id','last_checked','Fingerprint','Resolve-Master','Refresh-Messages','MessageState')
+          for($i=0;$i -lt $lines.Count;$i++){
+            $hit=$false
+            foreach($p in $patterns){if($lines[$i] -match [regex]::Escape($p)){$hit=$true;break}}
+            if($hit){
+              $a=[Math]::Max(0,$i-5);$b=[Math]::Min($lines.Count-1,$i+12)
+              Write-Host "===== CONTEXT $($i+1) ====="
+              for($j=$a;$j -le $b;$j++){Write-Host (('{0,5}: {1}' -f ($j+1),$lines[$j]))}
+            }
+          }
