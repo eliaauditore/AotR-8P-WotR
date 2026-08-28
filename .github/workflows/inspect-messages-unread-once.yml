@@ -26,12 +26,12 @@ jobs:
           $gui=Join-Path $env:RUNNER_TEMP 'launcher_gui_115.ps1'
           try{$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
           $lines=Get-Content -LiteralPath $gui
-          $patterns=@('last_seen','master_issue','unread','MESSAGES','message_id','last_checked','Fingerprint','Resolve-Master','Refresh-Messages','MessageState')
+          $patterns=@('SupportStatePath','StateRoot','GitHubApiRoot','HttpClient','function Get-HttpText','function Load-SupportState','function Register-SupportFingerprint','function Resolve-MasterIssue','function Get-MaintainerMessages','function Refresh-SupportMessages','$Window.Add_ContentRendered')
           for($i=0;$i -lt $lines.Count;$i++){
             $hit=$false
             foreach($p in $patterns){if($lines[$i] -match [regex]::Escape($p)){$hit=$true;break}}
             if($hit){
-              $a=[Math]::Max(0,$i-5);$b=[Math]::Min($lines.Count-1,$i+12)
+              $a=[Math]::Max(0,$i-10);$b=[Math]::Min($lines.Count-1,$i+28)
               Write-Host "===== CONTEXT $($i+1) ====="
               for($j=$a;$j -le $b;$j++){Write-Host (('{0,5}: {1}' -f ($j+1),$lines[$j]))}
             }
