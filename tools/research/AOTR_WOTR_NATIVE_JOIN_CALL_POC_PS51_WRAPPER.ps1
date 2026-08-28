@@ -21,6 +21,9 @@ $ErrorActionPreference = 'Stop'
 # IMPORTANT: invoke the patched script with NAMED splatting (hashtable), not array
 # splatting. Array splatting passes '-ProcessId' as the first positional argument and
 # causes PS5.1 to try converting the literal string '-ProcessId' to Int32.
+#
+# Do not inspect $LASTEXITCODE after invoking another PowerShell script. Under StrictMode
+# it may be undefined when no native executable set it. Script exceptions already propagate.
 
 if (-not (Test-Path -LiteralPath $SourcePath)) {
     throw "Source PoC not found: $SourcePath"
@@ -50,7 +53,7 @@ try {
     Write-Host '============================================================'
     Write-Host ("Source : {0}" -f $SourcePath)
     Write-Host ("Temp   : {0}" -f $temp)
-    Write-Host 'Fixes  : UIntPtr(0x1000), UIntPtr(stub length), named parameter splatting'
+    Write-Host 'Fixes  : UIntPtr(0x1000), UIntPtr(stub length), named parameter splatting, StrictMode cleanup'
     Write-Host ''
 
     $invoke = @{
@@ -62,9 +65,6 @@ try {
     if ($Execute) { $invoke['Execute'] = $true }
 
     & $temp @invoke
-    if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
 }
 finally {
     Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
