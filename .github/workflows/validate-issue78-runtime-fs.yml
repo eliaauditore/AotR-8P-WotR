@@ -1,0 +1,152 @@
+name: Validate Issue78 Runtime FS
+
+on:
+  push:
+    branches:
+      - hotfix/external-drive-link-fallback
+    paths:
+      - 'launcher-source/v21/**'
+      - '.github/workflows/validate-issue78-runtime-fs.yml'
+  pull_request:
+    paths:
+      - 'launcher-source/v21/**'
+      - 'repair-manifest.json'
+      - 'manifest.json'
+      - 'AotR 8P WotR Mod.exe'
+      - '.github/workflows/validate-issue78-runtime-fs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build exact 1.1.4 candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & '.\launcher-source\v21\BUILD_LAUNCHER_1_1_4_ISSUE78_CANDIDATE.ps1' -OutputRoot "$env:RUNNER_TEMP\issue78-build" -LauncherVersion '1.1.4'
+
+      - name: Simulate external source to local runtime staging
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = "$env:RUNNER_TEMP\issue78-build\package\AotR 8P WotR Mod.exe"
+          $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+
+          function Extract-Resource([string]$Name,[string]$Path) {
+            $s = $asm.GetManifestResourceStream($Name)
+            if (-not $s) { throw "missing resource $Name" }
+            try { $o=[IO.File]::Create($Path); try { $s.CopyTo($o) } finally { $o.Dispose() } } finally { $s.Dispose() }
+          }
+          function Extract-Functions([string]$Path,[string[]]$Names,[string]$OutPath) {
+            $tokens=$null; $errors=$null
+            $ast=[System.Management.Automation.Language.Parser]::ParseFile($Path,[ref]$tokens,[ref]$errors)
+            if ($errors.Count) { throw $errors[0].Message }
+            $wanted=@{}
+            foreach($n in $Names){$wanted[$n]=$true}
+            $funcs=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted.ContainsKey($node.Name)},$true))
+            if ($funcs.Count -ne $Names.Count) { throw "expected $($Names.Count) functions, got $($funcs.Count)" }
+            [IO.File]::WriteAllText($OutPath,(($funcs | ForEach-Object {$_.Extent.Text}) -join "`r`n`r`n"),(New-Object Text.UTF8Encoding($false)))
+          }
+
+          $engine="$env:RUNNER_TEMP\issue78-engine.ps1"
+          Extract-Resource 'AotR8P.EngineScript' $engine
+          $linkFns="$env:RUNNER_TEMP\issue78-link-functions.ps1"
+          Extract-Functions $engine @('Get-AotR8PVolumeRoot','New-LinkedFile','New-LinkedDirectory') $linkFns
+          . $linkFns
+
+          $sourceRoot = (Resolve-Path '.').Path
+          $sourceDrive = [IO.Path]::GetPathRoot($sourceRoot)
+          $destRoot = "C:\A8P_Issue78_CrossVolume_$PID"
+          if ([IO.Path]::GetPathRoot($destRoot) -ieq $sourceDrive) { throw 'CI did not provide distinct source/destination volumes' }
+          New-Item -ItemType Directory -Force -Path $destRoot | Out-Null
+          try {
+            $sourceFile=Join-Path $sourceRoot 'issue78-source-file.txt'
+            [IO.File]::WriteAllText($sourceFile,'issue78-cross-volume',[Text.Encoding]::UTF8)
+            $destFile=Join-Path $destRoot 'linked-file.txt'
+            New-LinkedFile $sourceFile $destFile
+            if (-not (Test-Path -LiteralPath $destFile -PathType Leaf)) { throw 'cross-volume file staging failed' }
+            if ([IO.File]::ReadAllText($destFile) -ne 'issue78-cross-volume') { throw 'cross-volume file content mismatch' }
+
+            $sourceDir=Join-Path $sourceRoot 'issue78-source-dir'
+            New-Item -ItemType Directory -Force -Path $sourceDir | Out-Null
+            [IO.File]::WriteAllText((Join-Path $sourceDir 'probe.txt'),'directory-cross-volume',[Text.Encoding]::UTF8)
+            $destDir=Join-Path $destRoot 'linked-dir'
+            New-LinkedDirectory $sourceDir $destDir
+            if (-not (Test-Path -LiteralPath (Join-Path $destDir 'probe.txt') -PathType Leaf)) { throw 'cross-volume directory staging failed' }
+            if ([IO.File]::ReadAllText((Join-Path $destDir 'probe.txt')) -ne 'directory-cross-volume') { throw 'cross-volume directory content mismatch' }
+            Write-Host 'CROSS_VOLUME_RUNTIME_STAGING_PASS'
+          }
+          finally {
+            Remove-Item -LiteralPath $destRoot -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $sourceRoot 'issue78-source-file.txt') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $sourceRoot 'issue78-source-dir') -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Verify reset_runtime migrates local and legacy layouts safely
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe = "$env:RUNNER_TEMP\issue78-build\package\AotR 8P WotR Mod.exe"
+          $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+          $s=$asm.GetManifestResourceStream('AotR8P.GuiScript')
+          $gui="$env:RUNNER_TEMP\issue78-gui.ps1"
+          try {$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($gui,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw $errors[0].Message}
+          $fn=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reset-PortableRuntime'},$true))
+          if($fn.Count -ne 1){throw 'Reset-PortableRuntime extraction failed'}
+          $reset="$env:RUNNER_TEMP\issue78-reset.ps1"
+          [IO.File]::WriteAllText($reset,$fn[0].Extent.Text,(New-Object Text.UTF8Encoding($false)))
+          . $reset
+          function Write-RepairLog([string]$Message){ Write-Host "REPAIRLOG: $Message" }
+
+          $oldLocal=$env:LOCALAPPDATA
+          $testLocal="C:\A8P_Issue78_Local_$PID"
+          $legacyRoot=Join-Path (Resolve-Path '.').Path "issue78-legacy-root"
+          $env:LOCALAPPDATA=$testLocal
+          try {
+            $localRuntime=Join-Path (Join-Path (Join-Path $testLocal 'AotR 8P WotR Mod') 'runtime') '_AOTR_8P_WOTR_RUNTIME'
+            $legacyRuntime=Join-Path $legacyRoot '_AOTR_8P_WOTR_RUNTIME'
+            New-Item -ItemType Directory -Force -Path $localRuntime,$legacyRuntime | Out-Null
+            [IO.File]::WriteAllText((Join-Path $localRuntime 'probe.txt'),'local')
+            [IO.File]::WriteAllText((Join-Path $legacyRuntime 'probe.txt'),'legacy')
+            $script:Install=[pscustomobject]@{Root=$legacyRoot}
+            Reset-PortableRuntime
+            if(Test-Path -LiteralPath $localRuntime){throw 'local runtime was not quarantined'}
+            if(Test-Path -LiteralPath $legacyRuntime){throw 'legacy runtime was not quarantined'}
+            if(-not @(Get-ChildItem -LiteralPath (Split-Path $localRuntime -Parent) -Directory -Filter '_AOTR_8P_WOTR_RUNTIME_REPAIR_*').Count){throw 'local quarantine missing'}
+            if(-not @(Get-ChildItem -LiteralPath $legacyRoot -Directory -Filter '_AOTR_8P_WOTR_RUNTIME_REPAIR_*').Count){throw 'legacy quarantine missing'}
+            Write-Host 'RESET_RUNTIME_MIGRATION_PASS'
+          }
+          finally {
+            $env:LOCALAPPDATA=$oldLocal
+            Remove-Item -LiteralPath $testLocal -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $legacyRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Verify repair manifest candidate contract
+        shell: powershell
+        run: |
+          $r=Get-Content "$env:RUNNER_TEMP\issue78-build\package\repair-manifest.json" -Raw | ConvertFrom-Json
+          if($r.generated_for_launcher -ne '1.1.4'){throw 'repair manifest version mismatch'}
+          $p=$r.plans.'A8P-RUNTIME-FS-001'
+          if(-not $p){throw 'A8P-RUNTIME-FS-001 repair plan missing'}
+          $expected=@('stop_legacy_runtime','stop_failed_game','reset_runtime','clear_compat_cache','retry_launch')
+          if((@($p.actions)-join '|') -ne ($expected-join '|')){throw 'A8P-RUNTIME-FS-001 repair plan mismatch'}
+          Write-Host 'ISSUE78_REPAIR_MANIFEST_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.4-Issue78-RC1
+          path: |
+            ${{ runner.temp }}/issue78-build/package
+            ${{ runner.temp }}/issue78-build/AotR_8P_War_of_the_Ring_1.1.4_Issue78_RC1.zip
+            ${{ runner.temp }}/issue78-build/SHA256SUMS.json
+            ${{ runner.temp }}/issue78-build/DEFENDER_SCAN.txt
+          if-no-files-found: error
