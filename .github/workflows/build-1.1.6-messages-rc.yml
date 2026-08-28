@@ -1,0 +1,124 @@
+name: Build 1.1.6 Messages RC
+
+on:
+  push:
+    branches:
+      - hotfix/messages-unread-state
+    paths:
+      - 'launcher-source/v23/**'
+      - '.github/workflows/build-1.1.6-messages-rc.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build exact 1.1.6 candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$env:RUNNER_TEMP\messages-1.1.6"
+          & '.\launcher-source\v23\BUILD_LAUNCHER_1_1_6_MESSAGES_CANDIDATE.ps1' -OutputRoot $out -LauncherVersion '1.1.6'
+          $exe=Join-Path $out 'package\AotR 8P WotR Mod.exe'
+          if(-not (Test-Path -LiteralPath $exe -PathType Leaf)){throw 'candidate EXE missing'}
+          if((Get-Content (Join-Path $out 'DEFENDER_SCAN.txt') -Raw).Trim() -ne 'SCANNED_CLEAN'){throw 'Defender gate not clean'}
+          $manifest=Get-Content (Join-Path $out 'package\manifest.json') -Raw | ConvertFrom-Json
+          $exeHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
+          if($manifest.launcher_version -ne '1.1.6'){throw 'manifest version mismatch'}
+          if($manifest.launcher_sha256 -ne $exeHash){throw 'manifest/exe hash mismatch'}
+          $repair=Get-Content (Join-Path $out 'package\repair-manifest.json') -Raw | ConvertFrom-Json
+          if($repair.generated_for_launcher -ne '1.1.6'){throw 'repair manifest version mismatch'}
+          Write-Host "CANDIDATE_EXE_SHA256=$exeHash"
+
+      - name: Test exact embedded MESSAGES unread/read lifecycle
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Net.Http
+          $out="$env:RUNNER_TEMP\messages-1.1.6"
+          $exe=Join-Path $out 'package\AotR 8P WotR Mod.exe'
+          $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+          $s=$asm.GetManifestResourceStream('AotR8P.GuiScript')
+          if(-not $s){throw 'GUI resource missing'}
+          $gui=Join-Path $env:RUNNER_TEMP 'launcher_gui_116.ps1'
+          try{$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
+          $guiHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $gui).Hash
+          Write-Host "EMBEDDED_GUI_SHA256=$guiHash"
+
+          $text=Get-Content -LiteralPath $gui -Raw
+          $bad='$comments = @(Get-HttpText ("$GitHubApiRoot/issues/$MasterIssue/comments?per_page=100") | ConvertFrom-Json)'
+          if($text.IndexOf($bad,[StringComparison]::Ordinal) -ge 0){throw 'legacy PS5 array-collapse expression still embedded'}
+          if($text.IndexOf('$parsedComments = Get-HttpText ("$GitHubApiRoot/issues/$MasterIssue/comments?per_page=100") | ConvertFrom-Json',[StringComparison]::Ordinal) -lt 0){throw 'parsedComments normalization missing'}
+          if($text.IndexOf('$comments = @($parsedComments)',[StringComparison]::Ordinal) -lt 0){throw 'comments array normalization missing'}
+
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($gui,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw "embedded GUI parse failed: $($errors[0].Message)"}
+          $wanted=@{}
+          foreach($n in @('Get-HttpText','Load-SupportState','Save-SupportState','Resolve-MasterIssue','Get-MaintainerMessages','Refresh-SupportMessages')){$wanted[$n]=$true}
+          $funcs=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted.ContainsKey($node.Name)},$true))
+          if($funcs.Count -ne 6){throw "function extraction mismatch: $($funcs.Count)"}
+          $fn=Join-Path $env:RUNNER_TEMP 'messages-116-functions.ps1'
+          [IO.File]::WriteAllText($fn,(($funcs|ForEach-Object{$_.Extent.Text})-join "`r`n`r`n"),(New-Object Text.UTF8Encoding($false)))
+          . $fn
+          function Set-MessagesIndicator {}
+          function Write-RepairLog([string]$Text){Write-Host "REPAIRLOG: $Text"}
+
+          $script:HttpClient=New-Object System.Net.Http.HttpClient
+          $script:HttpClient.Timeout=[TimeSpan]::FromSeconds(30)
+          $script:HttpClient.DefaultRequestHeaders.UserAgent.ParseAdd('AotR-8P-WotR-Launcher/1.1.6-RC-CI')
+          $script:HttpClient.DefaultRequestHeaders.Accept.ParseAdd('application/vnd.github+json')
+          $script:GitHubApiRoot='https://api.github.com/repos/eliaauditore/AotR-8P-WotR'
+          $script:SupportStatePath=Join-Path $env:RUNNER_TEMP 'support_state_116.json'
+          $seed=[ordered]@{schema=1;fingerprint='A8P-FP-53730198C7CD';master_issue=0;last_seen_message_id=0;latest_message_id=0;last_checked=''}
+          [IO.File]::WriteAllText($script:SupportStatePath,($seed|ConvertTo-Json -Depth 4),(New-Object Text.UTF8Encoding($false)))
+          $script:SupportState=$null
+
+          $script:SupportState=Load-SupportState
+          $messages=@(Refresh-SupportMessages)
+          $master=[int]$script:SupportState['master_issue']
+          $latest=[Int64]$script:SupportState['latest_message_id']
+          $seen=[Int64]$script:SupportState['last_seen_message_id']
+          Write-Host "UNREAD_MASTER=$master"
+          Write-Host "UNREAD_MESSAGE_COUNT=$($messages.Count)"
+          Write-Host "UNREAD_LATEST=$latest"
+          Write-Host "UNREAD_SEEN=$seen"
+          if($master -ne 78){throw "expected master 78, got $master"}
+          if($messages.Count -ne 2){throw "expected 2 broadcast messages, got $($messages.Count)"}
+          if($latest -lt 5450084118){throw "latest message too old: $latest"}
+          if($seen -ne 0){throw "startup incorrectly marked read: $seen"}
+          if($latest -le $seen){throw 'unread invariant failed'}
+
+          $script:SupportState=$null
+          $reloaded=Load-SupportState
+          if([int]$reloaded['master_issue'] -ne 78){throw 'master issue did not persist'}
+          if([Int64]$reloaded['latest_message_id'] -ne $latest){throw 'latest message did not persist'}
+          if([Int64]$reloaded['last_seen_message_id'] -ne 0){throw 'seen state changed before open'}
+          $script:SupportState=$reloaded
+
+          $opened=@(Refresh-SupportMessages -MarkRead)
+          $seenAfter=[Int64]$script:SupportState['last_seen_message_id']
+          $latestAfter=[Int64]$script:SupportState['latest_message_id']
+          Write-Host "MARKREAD_MESSAGE_COUNT=$($opened.Count)"
+          Write-Host "MARKREAD_LATEST=$latestAfter"
+          Write-Host "MARKREAD_SEEN=$seenAfter"
+          if($opened.Count -ne 2){throw 'MarkRead lost messages'}
+          if($seenAfter -ne $latestAfter){throw 'MarkRead did not advance seen to latest'}
+          Write-Host 'MESSAGES_1_1_6_EXACT_EMBEDDED_E2E=PASS'
+          $script:HttpClient.Dispose()
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.6-Messages-RC1
+          path: |
+            ${{ runner.temp }}/messages-1.1.6/package
+            ${{ runner.temp }}/messages-1.1.6/*.zip
+            ${{ runner.temp }}/messages-1.1.6/SHA256SUMS.json
+            ${{ runner.temp }}/messages-1.1.6/DEFENDER_SCAN.txt
+          if-no-files-found: error
