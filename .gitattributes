@@ -1,0 +1,5 @@
+# Byte-pinned successor resources must survive Git checkout without EOL conversion.
+launcher-source/v19-successor/resources/*.ps1 -text
+launcher-source/v19-successor/resources/*.bin -text
+launcher-source/v19-successor/resources/*.png -text
+launcher-source/v19-successor/resources/*.ico -text
