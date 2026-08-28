@@ -170,7 +170,9 @@ post-join State-8 injection
 
 Do not manually write `DE892C` and do not directly call `0x8467EB`.
 
-Before repeating a fresh join, resolve the frontend owner deterministically in the pre-join browser. Then run the smallest ordered causal test:
+Before repeating a fresh join, resolve the frontend owner deterministically in the pre-join browser. A new read-only provenance scanner searches for direct references to the proven live owner pointer, first inside `game.dat` image memory and then across committed readable memory. This must be run on the still-live post-test process before restarting AotR.
+
+Then run the smallest ordered causal test:
 
 ```text
 watcher READY
