@@ -42,6 +42,10 @@ if ($LASTEXITCODE -ne 0) { throw "Issue84 transient-session transform failed" }
     (Join-Path $PSScriptRoot "apply_issue84_session_runtime_hardening.py") `
     (Join-Path $Resources "launcher_engine.ps1")
 if ($LASTEXITCODE -ne 0) { throw "Issue84 session hardening transform failed" }
+& $Python `
+    (Join-Path $PSScriptRoot "apply_issue84_legacy_cleanup_hardening.py") `
+    (Join-Path $Resources "launcher_gui.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Issue84 chained legacy cleanup hardening failed" }
 '@
 $text = Replace-Once $text $oldTransform $newTransform 'session transform invocation'
 $text = Replace-Once $text '$SourceTemplate = Join-Path $RepoRoot "launcher-source\v20\launcher.cs"' '$SourceTemplate = $SourceTemplateV25' 'C# source template redirect'
@@ -60,6 +64,7 @@ if ($engineText -match [regex]::Escape('Join-Path $runtimeStageRoot ("_AOTR_8P_W
 if ($guiText -notmatch '--cleanup-runtime') { throw "Issue84 Auto-Repair transient cleanup helper missing" }
 if ($guiText -match [regex]::Escape('Move-Item -LiteralPath $runtimePath -Destination $quarantine')) { throw "Issue84 persistent quarantine move remains" }
 if ($guiText -match [regex]::Escape('$leaf + "_REPAIR_"')) { throw "Issue84 persistent REPAIR name construction remains" }
+if ($guiText -notmatch [regex]::Escape('(?:_REPAIR_\d{8}_\d{6}_\d+)+')) { throw "Issue84 chained legacy repair matcher missing" }
 $csText = [IO.File]::ReadAllText($SourceTemplateV25)
 foreach ($needle in @('RunRuntimeCleanupHelper','DeleteRuntimeTreeNoFollow','CleanupStaleRuntimeSessions','IsValidRuntimeSessionPath')) {
     if ($csText -notmatch [regex]::Escape($needle)) { throw "Issue84 C# runtime cleanup contract missing: $needle" }
