@@ -39,14 +39,86 @@ Additional watcher evidence:
 - callback `0x8496C2` was hit repeatedly;
 - completion `0x84944F` was never hit.
 
+## Callback-owner extraction
+
+The valid combined log contains 1,708 callback-bound owner records. All 1,708 are identical in the relevant fields:
+
+```text
+Owner      = 0x090B6F08
+Owner+6A4  = 1
+Owner+304  = 1
+Current    = C54B78
+```
+
+Counts:
+
+```text
+OWNER_6A4_EQ_8_COUNT = 0
+OWNER_6A4_NE_8_COUNT = 1708
+```
+
+Therefore the state gate is directly runtime-observed, not only inferred from static control flow.
+
+## Post-join State-8 sufficiency falsification
+
+A controlled single-DWORD experiment was then run on the same already-low-level-joined process after the valid watcher had detached cleanly.
+
+Preconditions:
+
+- same game PID and canonical `game.dat` hash;
+- same proven frontend owner;
+- `owner+0x6A4 = 1`;
+- `owner+0x304 = 1`;
+- `session+0x44 = C54B78`;
+- `DE892C = NULL`;
+- proven V5 watcher armed and detached cleanly.
+
+Mutation:
+
+```text
+owner+0x6A4 : 1 -> 8
+```
+
+Observed result:
+
+```text
+STATE8_WRITE_API_PASS       : YES
+POSTWRITE_STATE_READBACK    : 8
+CALLBACK_8496C2_HIT         : NO
+COMPLETION_84944F_HIT       : NO
+COMPLETION_AT_OWNER_STATE8  : NO
+DE892C_EQUALS_CURRENT       : NO
+WATCHER_CLEAN_EXIT          : YES
+STATE8_SUFFICIENCY_PROVEN   : NO
+FAILURE_STATE_RESTORED      : YES
+```
+
+The injected state remained at 8 during the observation window and was safely restored to 1 because no publication occurred.
+
+### Classification
+
+**BEWIESEN runtime:** writing State 8 *after* the low-level join has already completed is not sufficient to restart or trigger the callback/completion lifecycle. The callback is therefore not a continuously polling frontend function that can be unlocked after the fact.
+
+This does **not** falsify State 8 as a required pre-join state. The normal frontend sets State 8 immediately before the native `session->+0x40` call, while the valid low-level path never does. The next causal test must therefore reproduce the ordering:
+
+```text
+frontendOwner+0x6A4 = 8
+    -> immediately session->+0x40
+    -> callback 0x8496C2
+    -> completion 0x84944F
+    -> DE892C=current
+```
+
 ## Classification
 
 ### BEWIESEN — runtime
 
 1. Low-level native join reaches the frontend callback entry `0x8496C2`.
-2. The callback path does **not** reach `0x84944F` during this low-level join.
-3. Backend/session join completion is therefore insufficient to trigger native frontend publication by itself.
-4. `DE892C` stays `NULL` despite valid `C54B78` current GameInfo.
+2. All 1,708 callback-bound observations had `frontendOwner+0x6A4 = 1`.
+3. The callback path does **not** reach `0x84944F` during this low-level join.
+4. Backend/session join completion is therefore insufficient to trigger native frontend publication by itself.
+5. `DE892C` stays `NULL` despite valid `C54B78` current GameInfo.
+6. Post-join State-8 injection alone does not retrigger the callback lifecycle.
 
 ### BEWIESEN — static control flow
 
@@ -61,7 +133,7 @@ The relevant callback handler is:
            ...
 ```
 
-Therefore a callback hit at `0x8496C2` with no execution of `0x84944F` identifies the `frontendOwner+0x6A4 == 8` state gate as the blocking condition on the low-level path.
+Therefore a callback hit at `0x8496C2` with State 1 and no execution of `0x84944F` identifies the `frontendOwner+0x6A4 == 8` state gate as the blocking condition on the low-level path.
 
 ## Current model
 
@@ -81,21 +153,30 @@ low-level PoC
     session->+0x40 directly
         -> session+0x44 = C54B78
         -> callback 0x8496C2 DOES execute
+        -> owner state is 1 on all observed callback hits
         -> state-8 gate does not pass
         -> 0x84944F not executed
         -> DE892C remains NULL
+
+post-join State-8 injection
+    already joined/current C54B78
+        -> owner+0x6A4 1->8
+        -> no new callback occurs
+        -> no completion/publication
+        -> restore 8->1
 ```
 
 ## Next gate
 
 Do not manually write `DE892C` and do not directly call `0x8467EB`.
 
-Next work should identify and reproduce the smallest native frontend state transition that establishes `frontendOwner+0x6A4 = 8` before the low-level join, then re-run the already validated watcher to confirm:
+Before repeating a fresh join, resolve the frontend owner deterministically in the pre-join browser. Then run the smallest ordered causal test:
 
 ```text
-CALLBACK_8496C2_HIT   = YES
-COMPLETION_84944F_HIT = YES
-DE892C                 = current C54B78
+watcher READY
+-> owner+0x6A4 = 8
+-> immediately native session+0x40 join
+-> observe callback/completion/publication
 ```
 
-The next mutation should target the native frontend state machine, not the publication global.
+The next mutation still targets the native frontend state machine, not the publication global.
