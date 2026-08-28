@@ -71,7 +71,7 @@ jobs:
             'function Open-ExternalUrlSafe([string]$Url)',
             '$script:HttpClient.PostAsync($endpoint,$content)',
             'direct-report.json',
-            'REPORT SENT — ',
+            'REPORT SENT',
             'A8P-TICKET-{0:D4}',
             '$DiagRetryHit.Add_MouseLeftButtonUp({' 
           )){
