@@ -1,0 +1,43 @@
+name: Inspect Messages 1.1.5 Once
+
+on:
+  push:
+    branches:
+      - inspect/messages-1.1.5-runtime
+    paths:
+      - '.github/workflows/inspect-messages-1.1.5-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Extract embedded GUI and print MESSAGES functions
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\AotR 8P WotR Mod.exe').Path
+          $hash=(Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
+          Write-Host "PUBLIC_EXE_SHA256=$hash"
+          if($hash -ne 'FF5F907E2D8B2D87A410899ABE9A4512EAB419FF1D48327900932D6F97A85459'){throw 'not exact public 1.1.5 EXE'}
+          $asm=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+          $s=$asm.GetManifestResourceStream('AotR8P.GuiScript')
+          if(-not $s){throw 'GUI resource missing'}
+          $gui=Join-Path $env:RUNNER_TEMP 'launcher_gui_1_1_5.ps1'
+          try{$o=[IO.File]::Create($gui);try{$s.CopyTo($o)}finally{$o.Dispose()}}finally{$s.Dispose()}
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($gui,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw $errors[0].Message}
+          $terms='message|fingerprint|master|comment|seen|unread|notification|supportstate|support state'
+          $funcs=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true) | Where-Object { $_.Extent.Text -match $terms })
+          Write-Host "MATCHED_FUNCTIONS=$($funcs.Count)"
+          foreach($f in $funcs){
+            Write-Host "===== FUNCTION $($f.Name) ====="
+            Write-Host $f.Extent.Text
+            Write-Host "===== END $($f.Name) ====="
+          }
+          Write-Host '===== RELEVANT TOP-LEVEL LINES ====='
+          Select-String -LiteralPath $gui -Pattern 'Message|Fingerprint|Master|Comment|Seen|Unread|Notification|last_seen|master_issue' -CaseSensitive:$false | ForEach-Object { Write-Host ("{0}: {1}" -f $_.LineNumber,$_.Line) }
