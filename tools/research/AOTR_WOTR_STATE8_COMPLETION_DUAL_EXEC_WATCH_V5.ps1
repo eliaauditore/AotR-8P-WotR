@@ -4,7 +4,8 @@ param(
     [int]$TimeoutSeconds = 60,
     [string]$ReadyFile = '',
     [string]$StopFile = '',
-    [string]$StatusFile = ''
+    [string]$StatusFile = '',
+    [switch]$CompileOnly
 )
 
 Set-StrictMode -Version Latest
@@ -15,27 +16,7 @@ $Callback   = [uint32]0x008496C2
 $Completion = [uint32]0x0084944F
 
 if ([Environment]::Is64BitProcess) { throw 'Run under 32-bit Windows PowerShell.' }
-if (-not (Test-Path -LiteralPath $GameDat)) { throw "game.dat not found: $GameDat" }
-$hash = (Get-FileHash -LiteralPath $GameDat -Algorithm SHA256).Hash.ToUpperInvariant()
-if ($hash -ne $ExpectedHash) { throw "HASH MISMATCH. Expected $ExpectedHash got $hash" }
 if ($TimeoutSeconds -lt 20 -or $TimeoutSeconds -gt 120) { throw 'TimeoutSeconds must be 20..120.' }
-
-if ($ProcessId -eq 0) {
-    $m = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'game.dat' -and $_.ExecutablePath -eq $GameDat })
-    if ($m.Count -ne 1) { throw "Expected exactly one game.dat at $GameDat, found $($m.Count)" }
-    $ProcessId = [int]$m[0].ProcessId
-}
-$p = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId"
-if (-not $p) { throw "PID $ProcessId not found" }
-if ($p.ExecutablePath -ne $GameDat) { throw "PID path mismatch: $($p.ExecutablePath)" }
-
-foreach ($f in @($ReadyFile,$StopFile,$StatusFile)) {
-    if (-not [string]::IsNullOrWhiteSpace($f)) {
-        $d = Split-Path -Parent $f
-        if ($d) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
-        Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
-    }
-}
 
 if (-not ('AotrDualExec32V5' -as [type])) {
 Add-Type -TypeDefinition @'
@@ -57,11 +38,8 @@ public static class AotrDualExec32V5 {
     [StructLayout(LayoutKind.Sequential)] public struct FSA { public uint a,b,c,d,e,f,g; [MarshalAs(UnmanagedType.ByValArray,SizeConst=80)] public byte[] r; public uint h; }
     [StructLayout(LayoutKind.Sequential)] public struct CTX { public uint Flags,Dr0,Dr1,Dr2,Dr3,Dr6,Dr7; public FSA fs; public uint Gs,Fs,Es,Ds,Edi,Esi,Ebx,Edx,Ecx,Eax,Ebp,Eip,Cs,EFlags,Esp,Ss; [MarshalAs(UnmanagedType.ByValArray,SizeConst=512)] public byte[] x; }
 
-    // x86 DEBUG_EVENT is 96 bytes: three DWORD header fields (12 bytes) plus an
-    // 84-byte union. We only need three union members, so map them directly at their
-    // native x86 offsets instead of overlapping managed sub-structs.
-    // union+0x00: EXCEPTION_RECORD.ExceptionCode / CREATE_THREAD_DEBUG_INFO.hThread
-    // union+0x0C: EXCEPTION_RECORD.ExceptionAddress
+    // x86 DEBUG_EVENT = 12-byte header + 84-byte union = 96 bytes.
+    // Only fields used by this watcher are mapped. All overlapped fields are blittable.
     [StructLayout(LayoutKind.Explicit, Size=96)] public struct DE {
         [FieldOffset(0)]  public uint code;
         [FieldOffset(4)]  public uint pid;
@@ -69,6 +47,13 @@ public static class AotrDualExec32V5 {
         [FieldOffset(12)] public uint exceptionCode;
         [FieldOffset(12)] public IntPtr hThread;
         [FieldOffset(24)] public uint exceptionAddress;
+    }
+
+    public static string LayoutSelfTest(){
+        int size=Marshal.SizeOf(typeof(DE));
+        int h=Marshal.OffsetOf(typeof(DE),"hThread").ToInt32();
+        int a=Marshal.OffsetOf(typeof(DE),"exceptionAddress").ToInt32();
+        return "DEBUG_EVENT_SIZE="+size+" HTHREAD_OFFSET="+h+" EXADDR_OFFSET="+a;
     }
 
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool DebugActiveProcess(uint p);
@@ -164,6 +149,38 @@ public static class AotrDualExec32V5 {
     }
 }
 '@
+}
+
+$layout = [AotrDualExec32V5]::LayoutSelfTest()
+$expectedLayout = 'DEBUG_EVENT_SIZE=96 HTHREAD_OFFSET=12 EXADDR_OFFSET=24'
+if ($layout -ne $expectedLayout) {
+    throw "CLR DEBUG_EVENT layout mismatch. Expected [$expectedLayout], got [$layout]"
+}
+Write-Output ("CLR_LAYOUT_SELFTEST_PASS {0}" -f $layout)
+if ($CompileOnly) {
+    Write-Output 'COMPILE_ONLY_COMPLETE - no game process was opened or debugged.'
+    return
+}
+
+if (-not (Test-Path -LiteralPath $GameDat)) { throw "game.dat not found: $GameDat" }
+$hash = (Get-FileHash -LiteralPath $GameDat -Algorithm SHA256).Hash.ToUpperInvariant()
+if ($hash -ne $ExpectedHash) { throw "HASH MISMATCH. Expected $ExpectedHash got $hash" }
+
+if ($ProcessId -eq 0) {
+    $m = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'game.dat' -and $_.ExecutablePath -eq $GameDat })
+    if ($m.Count -ne 1) { throw "Expected exactly one game.dat at $GameDat, found $($m.Count)" }
+    $ProcessId = [int]$m[0].ProcessId
+}
+$p = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId"
+if (-not $p) { throw "PID $ProcessId not found" }
+if ($p.ExecutablePath -ne $GameDat) { throw "PID path mismatch: $($p.ExecutablePath)" }
+
+foreach ($f in @($ReadyFile,$StopFile,$StatusFile)) {
+    if (-not [string]::IsNullOrWhiteSpace($f)) {
+        $d = Split-Path -Parent $f
+        if ($d) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+        Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Output '============================================================'
