@@ -23,11 +23,37 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Build exact 1.1.4 candidate
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $expectedDonor='41CE4281105E61D4595621D0D0C9CFE70CEBA7EB692F1E4ED1C7703899B9FE21'
+          $publicExe=(Resolve-Path '.\AotR 8P WotR Mod.exe').Path
+          $current=(Get-FileHash -Algorithm SHA256 -LiteralPath $publicExe).Hash
+          if($current -ne $expectedDonor){
+            git fetch origin main:refs/remotes/origin/main
+            if($LASTEXITCODE -ne 0){throw 'could not fetch frozen main donor'}
+            $donor=Join-Path $env:RUNNER_TEMP 'AotR-1.1.3-donor.exe'
+            $psi=New-Object Diagnostics.ProcessStartInfo
+            $psi.FileName='git'
+            $psi.Arguments='cat-file blob "origin/main:AotR 8P WotR Mod.exe"'
+            $psi.UseShellExecute=$false
+            $psi.RedirectStandardOutput=$true
+            $psi.RedirectStandardError=$true
+            $p=[Diagnostics.Process]::Start($psi)
+            $out=[IO.File]::Create($donor)
+            try{$p.StandardOutput.BaseStream.CopyTo($out)}finally{$out.Dispose()}
+            $err=$p.StandardError.ReadToEnd()
+            $p.WaitForExit()
+            if($p.ExitCode -ne 0){throw "git cat-file donor failed: $err"}
+            $donorHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $donor).Hash
+            if($donorHash -ne $expectedDonor){throw "frozen 1.1.3 donor mismatch: $donorHash"}
+            Copy-Item -LiteralPath $donor -Destination $publicExe -Force
+            Write-Host 'FROZEN_1_1_3_DONOR_RESTORED_FOR_BUILD'
+          }
           & '.\launcher-source\v21\BUILD_LAUNCHER_1_1_4_ISSUE78_CANDIDATE.ps1' -OutputRoot "$env:RUNNER_TEMP\issue78-build" -LauncherVersion '1.1.4'
 
       - name: Simulate external source to local runtime staging
