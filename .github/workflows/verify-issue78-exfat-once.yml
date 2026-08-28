@@ -23,14 +23,14 @@ jobs:
 
           $vhd='C:\issue78-exfat-test.vhd'
           $letter='R'
-          $script=@"
-          create vdisk file="$vhd" maximum=256 type=expandable
-          select vdisk file="$vhd"
-          attach vdisk
-          create partition primary
-          format fs=exfat quick label=A8PTEST
-          assign letter=$letter
-          "@
+          $script = @(
+            ('create vdisk file="{0}" maximum=256 type=expandable' -f $vhd),
+            ('select vdisk file="{0}"' -f $vhd),
+            'attach vdisk',
+            'create partition primary',
+            'format fs=exfat quick label=A8PTEST',
+            ('assign letter={0}' -f $letter)
+          ) -join [Environment]::NewLine
           $diskpart=Join-Path $env:RUNNER_TEMP 'issue78-diskpart.txt'
           [IO.File]::WriteAllText($diskpart,$script,[Text.Encoding]::ASCII)
           diskpart /s $diskpart | Write-Host
@@ -81,10 +81,10 @@ jobs:
           }
           finally {
             Remove-Item -LiteralPath 'C:\A8P_Issue78_exFAT_State' -Recurse -Force -ErrorAction SilentlyContinue
-            $detach=@"
-            select vdisk file="$vhd"
-            detach vdisk
-            "@
+            $detach = @(
+              ('select vdisk file="{0}"' -f $vhd),
+              'detach vdisk'
+            ) -join [Environment]::NewLine
             [IO.File]::WriteAllText($diskpart,$detach,[Text.Encoding]::ASCII)
             diskpart /s $diskpart | Write-Host
             Remove-Item -LiteralPath $vhd -Force -ErrorAction SilentlyContinue
