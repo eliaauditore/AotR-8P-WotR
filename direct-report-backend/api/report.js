@@ -1,9 +1,12 @@
+const crypto = require('crypto');
+
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_ERROR_TEXT = 6000;
 const REPO = 'eliaauditore/AotR-8P-WotR';
 const ISSUE_API = `https://api.github.com/repos/${REPO}/issues`;
 
 const buckets = new Map();
+const RATE_KEY_SECRET = crypto.randomBytes(32);
 const WINDOW_MS = 60 * 60 * 1000;
 const MAX_PER_WINDOW = 5;
 
@@ -19,19 +22,27 @@ function text(v, max = 500) {
   return String(v).slice(0, max);
 }
 
-function ipOf(req) {
+function requestAddress(req) {
   return text(req.headers['x-forwarded-for'], 256).split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
 }
 
-function limited(ip) {
+function rateKey(req) {
+  // The hosting layer necessarily sees the request address, but the application
+  // never retains that raw value in its in-memory limiter state. A random,
+  // process-local HMAC key makes the stored bucket identifier non-reversible and
+  // intentionally unstable across cold starts/redeployments.
+  return crypto.createHmac('sha256', RATE_KEY_SECRET).update(requestAddress(req)).digest('hex');
+}
+
+function limited(key) {
   const now = Date.now();
-  const active = (buckets.get(ip) || []).filter(t => now - t < WINDOW_MS);
+  const active = (buckets.get(key) || []).filter(t => now - t < WINDOW_MS);
   if (active.length >= MAX_PER_WINDOW) {
-    buckets.set(ip, active);
+    buckets.set(key, active);
     return true;
   }
   active.push(now);
-  buckets.set(ip, active);
+  buckets.set(key, active);
   return false;
 }
 
@@ -106,7 +117,7 @@ module.exports = async function handler(req, res) {
 
   const declared = Number(req.headers['content-length'] || 0);
   if (declared > MAX_BODY_BYTES) return send(res, 413, { ok: false, error: 'payload_too_large' });
-  if (limited(ipOf(req))) return send(res, 429, { ok: false, error: 'rate_limited' });
+  if (limited(rateKey(req))) return send(res, 429, { ok: false, error: 'rate_limited' });
 
   let body = req.body;
   if (typeof body === 'string') {
