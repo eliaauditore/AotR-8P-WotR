@@ -1,0 +1,269 @@
+name: Fix Issue 72 Report Browser Fallback Once
+
+on:
+  push:
+    branches:
+      - fix/issue72-report-browser-fallback
+    paths:
+      - ".github/workflows/fix-issue72-report-browser-fallback-once.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-verify:
+    name: issue72-report-fallback-build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v5
+        with:
+          ref: fix/issue72-report-browser-fallback
+          fetch-depth: 1
+
+      - name: Checkout frozen 1.1.1 donor
+        uses: actions/checkout@v5
+        with:
+          ref: v1.1.1
+          path: donor-v1.1.1
+          fetch-depth: 1
+
+      - name: Patch REPORT ERROR browser fallback and set temporary GUI hash
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+
+          if 'issue72 report browser fallback' in text:
+              raise SystemExit('Issue #72 patch already present')
+
+          marker = '\nengine = replace_once(engine,'
+          pos = text.find(marker)
+          if pos < 0:
+              raise SystemExit('Could not find GUI/engine transform boundary')
+
+          patch = r'''
+
+# issue72 report browser fallback
+report_url_helper = '''function Open-ExternalUrl([string]$Url) {
+    if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
+
+    try {
+        Start-Process -FilePath $Url -ErrorAction Stop
+        return $true
+    }
+    catch {
+        Write-RepairLog ("Default URL handler failed: " + $_.Exception.Message)
+    }
+
+    try {
+        $psi = New-Object Diagnostics.ProcessStartInfo
+        $psi.FileName = $Url
+        $psi.UseShellExecute = $true
+        $process = [Diagnostics.Process]::Start($psi)
+        if ($null -ne $process) { $process.Dispose() }
+        return $true
+    }
+    catch {
+        Write-RepairLog ("ShellExecute URL fallback failed: " + $_.Exception.Message)
+    }
+
+    try {
+        $explorer = Join-Path $env:WINDIR "explorer.exe"
+        if (Test-Path -LiteralPath $explorer -PathType Leaf) {
+            Start-Process -FilePath $explorer -ArgumentList $Url -ErrorAction Stop
+            return $true
+        }
+    }
+    catch {
+        Write-RepairLog ("Explorer URL fallback failed: " + $_.Exception.Message)
+    }
+
+    return $false
+}
+
+'''
+gui = replace_once(gui, "function Open-LauncherReport {\n", report_url_helper + "function Open-LauncherReport {\n", "issue72 external URL helper")
+
+gui = replace_once(gui, '''        Start-Process $url
+
+        $DiagFooterText.Text = if ($usedCompactFallback) {
+''', '''        $opened = Open-ExternalUrl $url
+        if (-not $opened) {
+            Write-RepairLog ("Automatic browser opening failed; preserving report link locally.")
+            try { Save-LatestSupportBundle | Out-Null } catch {}
+
+            $reportLinkPath = Join-Path (Split-Path $SupportBundlePath -Parent) "report_link_latest.txt"
+            try {
+                [IO.File]::WriteAllText($reportLinkPath, $url + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+            } catch {
+                Write-RepairLog ("Could not save report link: " + $_.Exception.Message)
+            }
+
+            $linkCopied = $false
+            try {
+                [Windows.Clipboard]::SetText($url)
+                $linkCopied = $true
+            } catch {
+                Write-RepairLog ("Could not copy report link to clipboard: " + $_.Exception.Message)
+            }
+
+            $DiagFooterText.Text = if ($linkCopied) {
+                "Browser unavailable — report link copied to clipboard"
+            } else {
+                "Browser unavailable — report link saved locally"
+            }
+
+            $message = "GitHub could not be opened automatically.`r`n`r`n"
+            if ($linkCopied) {
+                $message += "The complete prefilled report link was copied to the clipboard. Paste it into any browser.`r`n`r`n"
+            } else {
+                $message += "The complete prefilled report link could not be copied automatically.`r`n`r`n"
+            }
+            $message += "Report link file:`r`n" + $reportLinkPath + "`r`n`r`nSupport bundle:`r`n" + $SupportBundlePath
+            if (-not $linkCopied) { $message += "`r`n`r`nReport URL:`r`n" + $url }
+
+            [System.Windows.Forms.MessageBox]::Show(
+                $message,
+                "AotR 8P WotR - Report Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+            return
+        }
+
+        $DiagFooterText.Text = if ($usedCompactFallback) {
+''', "issue72 report URL open fallback")
+
+gui = replace_once(gui,
+    "Full support bundle was too large for a safe GitHub prefill URL. The launcher saved support_bundle_latest.json locally and copied the full JSON to the clipboard.",
+    "Full support bundle was too large for a safe GitHub prefill URL. The launcher saved support_bundle_latest.json locally.",
+    "issue72 compact report wording")
+
+for token in (
+    "function Open-ExternalUrl",
+    "report_link_latest.txt",
+    "report link copied to clipboard",
+    "Paste it into any browser",
+    "ShellExecute URL fallback failed",
+):
+    if token not in gui:
+        raise SystemExit("Issue #72 GUI token missing: " + token)
+if "        Start-Process $url\n" in gui:
+    raise SystemExit("Issue #72 direct report URL Start-Process remains")
+'''
+
+          text = text[:pos] + patch + text[pos:]
+
+          m = re.search(r'EXPECTED_GUI_OUT = "([0-9A-F]{64})"', text)
+          if not m:
+              raise SystemExit('EXPECTED_GUI_OUT anchor missing')
+          text = text[:m.start(1)] + ('0' * 64) + text[m.end(1):]
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          pattern = r'(Assert-Hash \(Join-Path \$Resources "launcher_gui\.ps1"\) ")([0-9A-F]{64})(" "Clean GUI")'
+          bt, count = re.subn(pattern, lambda m: m.group(1) + ('0' * 64) + m.group(3), bt, count=1)
+          if count != 1:
+              raise SystemExit('Builder Clean GUI hash gate missing or non-unique')
+          b.write_text(bt, encoding='utf-8', newline='\n')
+
+      - name: Derive deterministic GUI hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          try {
+            .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+              -FrozenDonorRoot .\donor-v1.1.1 `
+              -OutputRoot .\_ISSUE72_HASH_DERIVE `
+              -LauncherVersion 1.1.2
+            throw 'Hash derivation unexpectedly succeeded with placeholder GUI hash.'
+          }
+          catch {
+            Write-Host "Expected hash-derivation stop: $($_.Exception.Message)"
+          }
+
+          $gui='.\_ISSUE72_HASH_DERIVE\work\resources\launcher_gui.ps1'
+          $engine='.\_ISSUE72_HASH_DERIVE\work\resources\launcher_engine.ps1'
+          if(-not(Test-Path -LiteralPath $gui)){throw 'Derived GUI resource missing'}
+          if(-not(Test-Path -LiteralPath $engine)){throw 'Derived engine resource missing'}
+          $guiHash=(Get-FileHash -LiteralPath $gui -Algorithm SHA256).Hash.ToUpperInvariant()
+          $engineHash=(Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash.ToUpperInvariant()
+          "GUI_HASH=$guiHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ENGINE_HASH=$engineHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "ISSUE72_GUI_SHA256=$guiHash"
+          Write-Host "ISSUE72_ENGINE_SHA256=$engineHash"
+
+      - name: Pin derived GUI hash
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+          import re
+
+          h = os.environ['GUI_HASH'].strip().upper()
+          if not re.fullmatch(r'[0-9A-F]{64}', h):
+              raise SystemExit('Invalid derived GUI hash')
+
+          p = Path('launcher-source/v19/prepare_clean_resources.py')
+          text = p.read_text(encoding='utf-8-sig')
+          placeholder = 'EXPECTED_GUI_OUT = "' + ('0' * 64) + '"'
+          if text.count(placeholder) != 1:
+              raise SystemExit('Transformer GUI placeholder missing')
+          text = text.replace(placeholder, f'EXPECTED_GUI_OUT = "{h}"', 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          b = Path('launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1')
+          bt = b.read_text(encoding='utf-8-sig')
+          old = 'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "' + ('0' * 64) + '" "Clean GUI"'
+          new = f'Assert-Hash (Join-Path $Resources "launcher_gui.ps1") "{h}" "Clean GUI"'
+          if bt.count(old) != 1:
+              raise SystemExit('Builder GUI placeholder missing')
+          b.write_text(bt.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+      - name: Commit Issue 72 source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add launcher-source/v19/prepare_clean_resources.py launcher-source/v19/BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1
+          git commit -m "Launcher 1.1.2: preserve report link when browser open fails"
+          git push origin HEAD:fix/issue72-report-browser-fallback
+
+      - name: Build and verify Issue 72 candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          .\launcher-source\v19\BUILD_LAUNCHER_1_1_2_CLEAN_CANDIDATE.ps1 `
+            -FrozenDonorRoot .\donor-v1.1.1 `
+            -OutputRoot .\_ISSUE72_BUILD `
+            -LauncherVersion 1.1.2
+
+          $gui='.\_ISSUE72_BUILD\work\resources\launcher_gui.ps1'
+          $engine='.\_ISSUE72_BUILD\work\resources\launcher_engine.ps1'
+          $guiText=Get-Content -LiteralPath $gui -Raw -Encoding UTF8
+          foreach($token in @('function Open-ExternalUrl','report_link_latest.txt','report link copied to clipboard','Paste it into any browser','ShellExecute URL fallback failed')){
+            if(-not $guiText.Contains($token)){throw "Issue72 token missing from built GUI: $token"}
+          }
+          if($guiText.Contains("        Start-Process `$url`n")){throw 'Direct report Start-Process remains'}
+          $engineHash=(Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($engineHash -ne $env:ENGINE_HASH){throw "Engine changed unexpectedly: $engineHash != $env:ENGINE_HASH"}
+          Write-Host 'ISSUE72_REPORT_BROWSER_FALLBACK_GATE=PASS'
+
+      - name: Upload Issue 72 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AotR-8P-WotR-1.1.2-Issue72-Report-Fallback
+          path: |
+            _ISSUE72_BUILD/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip
+            _ISSUE72_BUILD/AotR_8P_War_of_the_Ring_1.1.2_Clean_Candidate.zip.sha256.txt
+            _ISSUE72_BUILD/SHA256SUMS.json
+            _ISSUE72_BUILD/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 7
