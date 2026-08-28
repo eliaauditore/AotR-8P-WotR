@@ -15,7 +15,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Extract live embedded engine and GUI repair logic
+      - name: Extract exact runtime and repair functions
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -29,23 +29,23 @@ jobs:
             try { $text = $reader.ReadToEnd() } finally { $reader.Dispose(); $stream.Dispose() }
             $path = Join-Path $env:RUNNER_TEMP $OutName
             [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
-            Write-Host "$Name SHA256=$((Get-FileHash -Algorithm SHA256 $path).Hash)"
             return $path
           }
 
-          function Show-Hits([string]$Path,[string]$Pattern) {
-            $lines = Get-Content -LiteralPath $Path
-            $hits = for ($i=0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match $Pattern) { $i } }
-            if (-not $hits) { throw "No hits for pattern: $Pattern" }
-            foreach ($hit in ($hits | Select-Object -Unique)) {
-              $start=[Math]::Max(0,$hit-14); $end=[Math]::Min($lines.Count-1,$hit+24)
-              Write-Host "===== $([IO.Path]::GetFileName($Path)) lines $($start+1)-$($end+1) ====="
-              for ($j=$start; $j -le $end; $j++) { Write-Host ('{0:D4}: {1}' -f ($j+1),$lines[$j]) }
-            }
+          function Show-Function([string]$Path,[string]$FunctionName) {
+            $text = [IO.File]::ReadAllText($Path)
+            $pattern = '(?ms)^function\s+' + [regex]::Escape($FunctionName) + '\b.*?^}\s*$'
+            $m = [regex]::Match($text,$pattern)
+            if (-not $m.Success) { throw "Function not found: $FunctionName" }
+            Write-Host "===== FUNCTION $FunctionName ====="
+            Write-Host $m.Value
           }
 
           $engine = Read-Resource 'AotR8P.EngineScript' 'launcher_engine_113.ps1'
-          Show-Hits $engine 'function New-LinkedFile|function New-LinkedDirectory|_AOTR_8P_WOTR_RUNTIME'
+          Show-Function $engine 'New-LinkedFile'
+          Show-Function $engine 'New-LinkedDirectory'
+          Show-Function $engine 'Prepare-PortableModLayer'
 
           $gui = Read-Resource 'AotR8P.GuiScript' 'launcher_gui_113.ps1'
-          Show-Hits $gui 'reset_runtime|Reset-Runtime|Invoke-RepairAction|A8P-ENGINE-001|Launch timeout'
+          Show-Function $gui 'Reset-PortableRuntime'
+          Show-Function $gui 'Resolve-LauncherAotRRoot'
