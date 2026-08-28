@@ -15,37 +15,23 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Extract exact runtime and repair functions
+      - name: Verify runtime path handoff
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path '.\AotR 8P WotR Mod.exe').Path
           $asm = [Reflection.Assembly]::LoadFile($exe)
-
-          function Read-Resource([string]$Name,[string]$OutName) {
-            $stream = $asm.GetManifestResourceStream($Name)
-            if (-not $stream) { throw "$Name resource missing" }
-            $reader = New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true)
-            try { $text = $reader.ReadToEnd() } finally { $reader.Dispose(); $stream.Dispose() }
-            $path = Join-Path $env:RUNNER_TEMP $OutName
-            [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
-            return $path
+          $stream = $asm.GetManifestResourceStream('AotR8P.EngineScript')
+          if (-not $stream) { throw 'Engine resource missing' }
+          $reader = New-Object IO.StreamReader($stream,[Text.Encoding]::UTF8,$true)
+          try { $text = $reader.ReadToEnd() } finally { $reader.Dispose(); $stream.Dispose() }
+          $lines = $text -split "`r?`n"
+          $hits = for ($i=0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match 'Start-Process|ArgumentList|modCommandLine|\-mod\b|\$test\b|\$runtime\b') { $i }
           }
-
-          function Show-Function([string]$Path,[string]$FunctionName) {
-            $text = [IO.File]::ReadAllText($Path)
-            $pattern = '(?ms)^function\s+' + [regex]::Escape($FunctionName) + '\b.*?^}\s*$'
-            $m = [regex]::Match($text,$pattern)
-            if (-not $m.Success) { throw "Function not found: $FunctionName" }
-            Write-Host "===== FUNCTION $FunctionName ====="
-            Write-Host $m.Value
+          foreach ($hit in ($hits | Select-Object -Unique)) {
+            $start=[Math]::Max(0,$hit-8); $end=[Math]::Min($lines.Count-1,$hit+12)
+            Write-Host "===== lines $($start+1)-$($end+1) ====="
+            for ($j=$start; $j -le $end; $j++) { Write-Host ('{0:D4}: {1}' -f ($j+1),$lines[$j]) }
           }
-
-          $engine = Read-Resource 'AotR8P.EngineScript' 'launcher_engine_113.ps1'
-          Show-Function $engine 'New-LinkedFile'
-          Show-Function $engine 'New-LinkedDirectory'
-          Show-Function $engine 'Prepare-PortableModLayer'
-
-          $gui = Read-Resource 'AotR8P.GuiScript' 'launcher_gui_113.ps1'
-          Show-Function $gui 'Reset-PortableRuntime'
-          Show-Function $gui 'Resolve-LauncherAotRRoot'
+          if ($text -notmatch '(?i)-mod') { throw 'No mod path argument found' }
