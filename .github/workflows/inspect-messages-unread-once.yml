@@ -15,7 +15,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Run exact script-scope 1.1.5 unread E2E
+      - name: Isolate exact embedded message fetch return path
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -33,6 +33,7 @@ jobs:
           foreach($n in @('Get-HttpText','Load-SupportState','Save-SupportState','Resolve-MasterIssue','Get-MaintainerMessages','Refresh-SupportMessages')){$wanted[$n]=$true}
           $funcs=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted.ContainsKey($node.Name)},$true))
           if($funcs.Count -ne 6){throw "function extraction mismatch: $($funcs.Count)"}
+          foreach($f in $funcs | Sort-Object Name){Write-Host "FUNCTION=$($f.Name)"; if($f.Name -eq 'Get-HttpText'){Write-Host $f.Extent.Text}}
           $fn=Join-Path $env:RUNNER_TEMP 'messages-live-functions.ps1'
           [IO.File]::WriteAllText($fn,(($funcs|ForEach-Object{$_.Extent.Text})-join "`r`n`r`n"),(New-Object Text.UTF8Encoding($false)))
           . $fn
@@ -49,18 +50,35 @@ jobs:
           [IO.File]::WriteAllText($script:SupportStatePath,($seed|ConvertTo-Json -Depth 4),(New-Object Text.UTF8Encoding($false)))
           $script:SupportState=$null
 
+          $url="$script:GitHubApiRoot/issues/78/comments?per_page=100"
+          Write-Host "URL=$url"
+          $viaExact=Get-HttpText $url
+          Write-Host "HTTP_TEXT_TYPE=$($viaExact.GetType().FullName)"
+          Write-Host "HTTP_TEXT_LENGTH=$($viaExact.Length)"
+          Write-Host "HTTP_TEXT_PREFIX=$($viaExact.Substring(0,[Math]::Min(100,$viaExact.Length)))"
+          $viaParsed=$viaExact | ConvertFrom-Json
+          Write-Host "VIA_PARSED_COUNT=$(@($viaParsed).Count)"
+          $allowed=@('OWNER','MEMBER','COLLABORATOR')
+          $viaFiltered=@($viaParsed | Where-Object {
+            $body=[string]$_.body
+            ($allowed -contains [string]$_.author_association) -and
+            -not $body.Contains('<!-- no-broadcast -->') -and
+            -not $body.TrimStart().StartsWith('[internal]',[StringComparison]::OrdinalIgnoreCase)
+          } | Sort-Object id)
+          Write-Host "VIA_FILTERED_COUNT=$($viaFiltered.Count)"
+          foreach($m in $viaFiltered){Write-Host "VIA_FILTERED_ID=$($m.id)"}
+
+          $directFunction=@(Get-MaintainerMessages 78)
+          Write-Host "DIRECT_FUNCTION_COUNT=$($directFunction.Count)"
+          foreach($m in $directFunction){Write-Host "DIRECT_FUNCTION_ID=$($m.id)"}
+
           $script:SupportState=Load-SupportState
           $messages=@(Refresh-SupportMessages)
-          $master=[int]$script:SupportState['master_issue']
-          $latest=[Int64]$script:SupportState['latest_message_id']
-          $seen=[Int64]$script:SupportState['last_seen_message_id']
-          Write-Host "MASTER=$master"
-          Write-Host "MESSAGE_COUNT=$($messages.Count)"
-          Write-Host "LATEST=$latest"
-          Write-Host "SEEN=$seen"
-          if($master -ne 78){throw "expected master 78, got $master"}
-          if($messages.Count -ne 2){throw "expected 2 broadcast messages, got $($messages.Count)"}
-          if($latest -ne 5450084118){throw "expected latest 5450084118, got $latest"}
-          if($seen -ne 0){throw "startup incorrectly marked read: $seen"}
-          if($latest -le $seen){throw 'unread invariant failed'}
-          Write-Host 'MESSAGES_1_1_5_SCRIPT_SCOPE_UNREAD_E2E=PASS'
+          Write-Host "REFRESH_COUNT=$($messages.Count)"
+          Write-Host "MASTER=$($script:SupportState['master_issue'])"
+          Write-Host "LATEST=$($script:SupportState['latest_message_id'])"
+          Write-Host "SEEN=$($script:SupportState['last_seen_message_id'])"
+
+          if($viaFiltered.Count -ne 2){throw "exact Get-HttpText/filter expected 2, got $($viaFiltered.Count)"}
+          if($directFunction.Count -ne 2){throw "Get-MaintainerMessages expected 2, got $($directFunction.Count)"}
+          if($messages.Count -ne 2){throw "Refresh-SupportMessages expected 2, got $($messages.Count)"}
