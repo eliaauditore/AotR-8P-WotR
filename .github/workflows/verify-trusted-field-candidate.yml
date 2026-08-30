@@ -1,0 +1,110 @@
+name: Verify Trusted Windows Field Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'GitHub Actions run ID that produced the already-signed artifact'
+        required: true
+        type: string
+      artifact_name:
+        description: 'Exact signed artifact name'
+        required: true
+        type: string
+      expected_sha256:
+        description: 'Exact post-sign SHA256 (64 hex characters)'
+        required: true
+        type: string
+      expected_version:
+        description: 'Expected launcher ProductVersion'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify-trusted-field-candidate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout verification policy
+        uses: actions/checkout@v5
+
+      - name: Validate input hash shape
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ('${{ inputs.expected_sha256 }}' -notmatch '^[A-Fa-f0-9]{64}$') {
+              throw 'expected_sha256 must be exactly 64 hexadecimal characters.'
+          }
+          Write-Host 'TRUSTED_FIELD_INPUT_SHAPE=PASS'
+
+      - name: Download already-signed candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: _signed_candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Require exactly one launcher EXE
+        id: candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $matches = @(Get-ChildItem -LiteralPath '.\_signed_candidate' -Recurse -File -Filter 'AotR 8P WotR Mod.exe')
+          if ($matches.Count -ne 1) {
+              throw "Expected exactly one signed launcher EXE, found $($matches.Count)."
+          }
+          $path = $matches[0].FullName
+          "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "SIGNED_FIELD_CANDIDATE_PATH=$path"
+
+      - name: Verify Authenticode, RSA, timestamp, signtool and exact hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & '.\launcher-source\signing\VERIFY_TRUSTED_FIELD_CANDIDATE.ps1' `
+              -ExePath '${{ steps.candidate.outputs.path }}' `
+              -ExpectedSha256 '${{ inputs.expected_sha256 }}' `
+              -ExpectedProductVersion '${{ inputs.expected_version }}' `
+              -ReportPath '.\_signed_candidate\TRUSTED_FIELD_CANDIDATE_REPORT.json'
+
+      - name: Hosted Defender scan of exact signed candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = '${{ steps.candidate.outputs.path }}'
+          $mp = @(
+              "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+              "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1
+          if (-not $mp) { throw 'Windows Defender MpCmdRun.exe unavailable.' }
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          if ($LASTEXITCODE -ne 0) { throw "Hosted Defender scan failed with exit=$LASTEXITCODE" }
+          Write-Host 'TRUSTED_FIELD_CANDIDATE_DEFENDER=PASS'
+
+      - name: Publish verification summary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $report = Get-Content -LiteralPath '.\_signed_candidate\TRUSTED_FIELD_CANDIDATE_REPORT.json' -Raw | ConvertFrom-Json
+          @(
+              '### Trusted Windows Field Candidate Gate — PASS',
+              '',
+              "- ProductVersion: ``$($report.product_version)``",
+              "- post-sign SHA256: ``$($report.post_sign_sha256)``",
+              "- Authenticode: ``$($report.authenticode_status)``",
+              "- signer: ``$($report.signer_subject)``",
+              "- issuer: ``$($report.signer_issuer)``",
+              "- signer thumbprint: ``$($report.signer_thumbprint)``",
+              "- timestamp signer: ``$($report.timestamp_subject)``",
+              '- signtool `/pa /v`: PASS',
+              '- hosted Defender: PASS',
+              '',
+              '**This verification permits field-candidate classification; it does not itself promote or release the binary.**'
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
