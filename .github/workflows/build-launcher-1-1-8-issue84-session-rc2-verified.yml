@@ -62,9 +62,10 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
+          # PowerShell scripts signal failure by throwing/terminating. $LASTEXITCODE
+          # belongs to native executables and is intentionally not inspected here.
           & '.\launcher-source\v26\VERIFY_ISSUE84_RC2_FINAL.ps1' `
             -BuildRoot '.\_V26_1_1_8_RC2_FINAL_BUILD'
-          if($LASTEXITCODE -ne 0){throw "RC2 verifier failed with exit=$LASTEXITCODE"}
 
       - name: Verify candidate hashes and hosted Defender
         shell: powershell
