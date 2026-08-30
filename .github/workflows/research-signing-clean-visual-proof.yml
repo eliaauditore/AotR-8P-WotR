@@ -5,7 +5,7 @@ on:
     branches:
       - research/signing-clean-visual-proof-88
     paths:
-      - 'launcher-source/v19-successor/BUILD_SIGNING_CLEAN_VISUAL_PROOF_V2.ps1'
+      - 'launcher-source/v19-successor/BUILD_SIGNING_CLEAN_VISUAL_PROOF_V3.ps1'
       - 'launcher-source/v19-successor/resources/**'
       - 'launcher-source/v19/launcher.cs'
       - 'launcher-source/v19/VERIFY_V7_RESOURCE_CHAIN.ps1'
@@ -26,7 +26,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $path = '.\launcher-source\v19-successor\BUILD_SIGNING_CLEAN_VISUAL_PROOF_V2.ps1'
+          $path = '.\launcher-source\v19-successor\BUILD_SIGNING_CLEAN_VISUAL_PROOF_V3.ps1'
           $tokens = $null
           $errors = $null
           [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors)
@@ -40,23 +40,31 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $out = Join-Path $env:RUNNER_TEMP 'aotr8p-signing-clean-visual-proof'
-          & '.\launcher-source\v19-successor\BUILD_SIGNING_CLEAN_VISUAL_PROOF_V2.ps1' `
+          $out = Join-Path $env:RUNNER_TEMP 'aotr8p-signing-clean-visual-proof-v3'
+          & '.\launcher-source\v19-successor\BUILD_SIGNING_CLEAN_VISUAL_PROOF_V3.ps1' `
               -OutputRoot $out `
-              -LauncherVersion '1.1.3-signingclean-visualproof2'
+              -LauncherVersion '1.1.3-signingclean-visualproof3'
 
           $reportPath = Join-Path $out 'SIGNING_CLEAN_VISUAL_PROOF_REPORT.json'
           if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Proof report missing.' }
           $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
           if ($report.state -ne 'NON_RELEASE_SIGNING_CLEAN_VISUAL_PROOF') { throw "Unexpected report state: $($report.state)" }
-          if ($report.launcher_version -ne '1.1.3-signingclean-visualproof2') { throw "Unexpected proof version: $($report.launcher_version)" }
+          if ($report.strategy -ne 'GENERATED_PROJECT_NEUTRAL_VISUALS') { throw "Unexpected proof strategy: $($report.strategy)" }
+          if ($report.launcher_version -ne '1.1.3-signingclean-visualproof3') { throw "Unexpected proof version: $($report.launcher_version)" }
           if ($report.public_release_modified -ne $false) { throw 'Proof claims public release mutation.' }
           if ($report.field_execution_allowed -ne $false) { throw 'Research proof must never authorize field execution.' }
+          if ($report.historical_visual_files_used_as_build_inputs -ne $false) { throw 'Historical visual files were classified as build inputs.' }
+          if ($report.custom_pe_icon_embedded -ne $false) { throw 'Custom PE icon unexpectedly embedded.' }
 
           $expectedEmbedded = @(
               'AotR8P.EngineScript',
               'AotR8P.FinalStableV7',
               'AotR8P.GuiScript',
+              'AotR8P.LauncherSkin',
+              'AotR8P.ReadyPatch',
+              'AotR8P.Row1Patch',
+              'AotR8P.Row2Patch',
+              'AotR8P.Row3Patch',
               'AotR8P.V7Shellcode'
           ) | Sort-Object
           $actualEmbedded = @($report.embedded_resources | Sort-Object)
@@ -64,19 +72,11 @@ jobs:
               throw "Unexpected embedded-resource set: $($actualEmbedded -join ', ')"
           }
 
-          $expectedExcluded = @(
-              'launcher.ico',
-              'launcher_skin.png',
-              'readycleanpatch.png',
-              'row1cleanpatch.png',
-              'row2cleanpatch.png',
-              'row3cleanpatch.png'
-          ) | Sort-Object
-          $actualExcluded = @($report.excluded_visual_resources | Sort-Object)
-          if (($actualExcluded -join '|') -ne ($expectedExcluded -join '|')) {
-              throw "Excluded visual set mismatch: $($actualExcluded -join ', ')"
+          $generatedHashes = @($report.generated_visual_hashes.PSObject.Properties | ForEach-Object { ([string]$_.Value).ToUpperInvariant() })
+          $historicalHashes = @($report.historical_visual_hashes_forbidden.PSObject.Properties | ForEach-Object { ([string]$_.Value).ToUpperInvariant() })
+          foreach ($hash in $generatedHashes) {
+              if ($historicalHashes -contains $hash) { throw "Generated visual hash matches blocked historical visual: $hash" }
           }
-          if ($report.custom_pe_icon_embedded -ne $false) { throw 'Custom PE icon unexpectedly embedded.' }
 
           "PROOF_ROOT=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "SIGNING_CLEAN_VISUAL_PROOF_REPORT_GATE=PASS"
@@ -115,7 +115,7 @@ jobs:
       - name: Upload evidence only — never the unsigned proof EXE
         uses: actions/upload-artifact@v4
         with:
-          name: signing-clean-visual-proof-report
+          name: signing-clean-visual-proof-report-v3
           path: |
             ${{ env.PROOF_ROOT }}/SIGNING_CLEAN_VISUAL_PROOF_REPORT.json
             ${{ env.PROOF_ROOT }}/DEFENDER_SCAN.txt
