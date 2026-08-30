@@ -35,7 +35,8 @@ $text = Replace-Once $text `
     '"_generated_v26_rc2_v2_builder.ps1"' `
     'RC2 V2 generated builder name'
 
-$Generated = Join-Path $env:TEMP ("AOTR_ISSUE84_RC2_V2_BUILDER_" + [Guid]::NewGuid().ToString("N") + ".ps1")
+# Keep the generated wrapper beside V26 so its $PSScriptRoot remains the repo path.
+$Generated = Join-Path $PSScriptRoot ("_generated_rc2_v2_outer_" + [Guid]::NewGuid().ToString("N") + ".ps1")
 [IO.File]::WriteAllText($Generated,$text,(New-Object Text.UTF8Encoding($false)))
 try {
     & $Generated -OutputRoot $OutputRoot -LauncherVersion $LauncherVersion
