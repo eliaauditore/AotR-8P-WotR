@@ -1,0 +1,103 @@
+name: Build Launcher 1.1.8 Issue84 Session RC2 Verified
+
+on:
+  push:
+    branches:
+      - hotfix/runtime-session-temp-1.1.8-rc2
+    paths:
+      - 'launcher-source/v25/**'
+      - 'launcher-source/v26/**'
+      - '.github/workflows/build-launcher-1-1-8-issue84-session-rc2-verified.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Freeze public 1.1.6 boundary
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $manifest=Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
+          if($manifest.launcher_version -ne '1.1.6'){throw "Public manifest moved: $($manifest.launcher_version)"}
+          $hash=(Get-FileHash -LiteralPath '.\AotR 8P WotR Mod.exe' -Algorithm SHA256).Hash
+          if($hash -ne 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431'){
+            throw "Frozen public 1.1.6 EXE changed: $hash"
+          }
+          Write-Host 'ISSUE84_RC2_PUBLIC_BOUNDARY=PASS'
+
+      - name: Parse RC2 sources and verifier
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile `
+            '.\launcher-source\v26\apply_issue84_session_runtime_rc2_hardening.py' `
+            '.\launcher-source\v26\apply_issue84_session_runtime_rc2_hardening_v2.py'
+          if($LASTEXITCODE -ne 0){throw 'RC2 Python parse failed'}
+          foreach($path in @(
+            '.\launcher-source\v26\BUILD_LAUNCHER_1_1_8_ISSUE84_SESSION_RC2.ps1',
+            '.\launcher-source\v26\BUILD_LAUNCHER_1_1_8_ISSUE84_SESSION_RC2_FINAL.ps1',
+            '.\launcher-source\v26\VERIFY_ISSUE84_RC2_FINAL.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw "PS5.1 parse failure: $path :: $($errors[0].Message)"}
+          }
+          Write-Host 'ISSUE84_RC2_SOURCE_PARSE=PASS'
+
+      - name: Build final RC2 candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & '.\launcher-source\v26\BUILD_LAUNCHER_1_1_8_ISSUE84_SESSION_RC2_FINAL.ps1' `
+            -OutputRoot '.\_V26_1_1_8_RC2_FINAL_BUILD'
+          if($LASTEXITCODE -ne 0){throw "RC2 build failed with exit=$LASTEXITCODE"}
+
+      - name: Run executable lifecycle verifier
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & '.\launcher-source\v26\VERIFY_ISSUE84_RC2_FINAL.ps1' `
+            -BuildRoot '.\_V26_1_1_8_RC2_FINAL_BUILD'
+          if($LASTEXITCODE -ne 0){throw "RC2 verifier failed with exit=$LASTEXITCODE"}
+
+      - name: Verify candidate hashes and hosted Defender
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\_V26_1_1_8_RC2_FINAL_BUILD\package\AotR 8P WotR Mod.exe').Path
+          $fvi=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+          if($fvi.ProductVersion -ne '1.1.8'){throw "ProductVersion=$($fvi.ProductVersion)"}
+          $exeHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          Write-Host "ISSUE84_RC2_FINAL_EXE_SHA256=$exeHash"
+
+          $zip=Get-ChildItem -LiteralPath '.\_V26_1_1_8_RC2_FINAL_BUILD' -Filter '*.zip' -File | Select-Object -First 1
+          if(-not $zip){throw 'Final RC2 ZIP missing'}
+          $zipHash=(Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash
+          Write-Host "ISSUE84_RC2_FINAL_ZIP_SHA256=$zipHash"
+
+          $mp=@(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if(-not $mp){throw 'Windows Defender MpCmdRun.exe unavailable'}
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          if($LASTEXITCODE -ne 0){throw "Hosted Defender scan exit=$LASTEXITCODE"}
+          Write-Host 'ISSUE84_RC2_FINAL_DEFENDER=PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-1.1.8-Issue84-Session-RC2-Verified
+          path: |
+            _V26_1_1_8_RC2_FINAL_BUILD/package/**
+            _V26_1_1_8_RC2_FINAL_BUILD/SHA256SUMS.json
+            _V26_1_1_8_RC2_FINAL_BUILD/*.zip
+            _V26_1_1_8_RC2_FINAL_BUILD/*.sha256.txt
+            _V26_1_1_8_RC2_FINAL_BUILD/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 90
