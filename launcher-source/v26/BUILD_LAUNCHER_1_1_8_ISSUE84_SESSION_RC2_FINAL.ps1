@@ -43,12 +43,10 @@ $text = Replace-Once $text `
     '"_generated_v26_rc2_final_builder.ps1"' `
     'final RC2 generated builder name'
 
-# The V21 compatibility builder originally asserted a literal one-step
-# Join-Path $StateRoot "runtime\sessions" string. RC2 intentionally builds the
-# same path in two steps so both runtime and sessions can be independently
-# checked for reparse/junction manipulation. Patch the generated guard itself
-# to validate those two semantic construction lines instead of relying on a
-# comment/sentinel in production source.
+# The inherited V21/V25 builder contains two literal one-step runtime\sessions
+# checks. RC2 intentionally builds the same path in two steps so both runtime
+# and sessions can be independently checked for reparse/junction manipulation.
+# Rewrite both generated guards to validate the real semantic construction.
 $oldGuardTransform = @'
 $text = Replace-Once $text 'if ($engineText -notmatch [regex]::Escape(''Join-Path $stateRoot "runtime"'')) { throw "Local runtime root patch missing" }' 'if ($engineText -notmatch [regex]::Escape(''Join-Path $StateRoot "runtime\sessions"'')) { throw "Local runtime session root patch missing" }' 'inherited local runtime guard'
 '@.Trim()
@@ -58,6 +56,16 @@ $text = Replace-Once $text 'if ($engineText -notmatch [regex]::Escape(''Join-Pat
 '@.Trim()
 
 $text = Replace-Once $text $oldGuardTransform $newGuardTransform 'semantic inherited session-root guard transform'
+
+$oldStaticSessionCheck = @'
+if ($engineText -notmatch [regex]::Escape('runtime\sessions')) { throw "Issue84 local session root missing" }
+'@.Trim()
+
+$newStaticSessionCheck = @'
+if ($engineText -notmatch [regex]::Escape('$runtimeRoot = Join-Path $stateRootFull "runtime"') -or $engineText -notmatch [regex]::Escape('$sessionRoot = Join-Path $runtimeRoot "sessions"')) { throw "Issue84 local session-root construction missing" }
+'@.Trim()
+
+$text = Replace-Once $text $oldStaticSessionCheck $newStaticSessionCheck 'semantic Issue84 session-root static check'
 
 $Generated = Join-Path $PSScriptRoot ("_generated_rc2_final_outer_" + [Guid]::NewGuid().ToString("N") + ".ps1")
 [IO.File]::WriteAllText($Generated,$text,(New-Object Text.UTF8Encoding($false)))
