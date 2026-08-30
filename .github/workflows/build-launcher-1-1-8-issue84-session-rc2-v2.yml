@@ -1,0 +1,117 @@
+name: Build Launcher 1.1.8 Issue84 Session RC2 V2
+
+on:
+  push:
+    branches:
+      - hotfix/runtime-session-temp-1.1.8-rc2
+    paths:
+      - 'launcher-source/v25/**'
+      - 'launcher-source/v26/**'
+      - '.github/workflows/build-launcher-1-1-8-issue84-session-rc2-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse corrected RC2 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile `
+            '.\launcher-source\v26\apply_issue84_session_runtime_rc2_hardening.py' `
+            '.\launcher-source\v26\apply_issue84_session_runtime_rc2_hardening_v2.py'
+          if($LASTEXITCODE -ne 0){throw 'RC2 Python parse failed'}
+          foreach($builder in @(
+            '.\launcher-source\v26\BUILD_LAUNCHER_1_1_8_ISSUE84_SESSION_RC2.ps1',
+            '.\launcher-source\v26\BUILD_LAUNCHER_1_1_8_ISSUE84_SESSION_RC2_V2.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $builder),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw "PS5.1 parse failure: $builder :: $($errors[0].Message)"}
+          }
+          Write-Host 'ISSUE84_RC2_V2_SOURCE_PARSE=PASS'
+
+      - name: Build corrected 1.1.8 RC2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & '.\launcher-source\v26\BUILD_LAUNCHER_1_1_8_ISSUE84_SESSION_RC2_V2.ps1' `
+            -OutputRoot '.\_V26_1_1_8_RC2_V2_BUILD'
+          if($LASTEXITCODE -ne 0){throw "V26 RC2 V2 builder failed with exit code $LASTEXITCODE"}
+
+      - name: Validate corrected lifecycle contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $engine=(Resolve-Path '.\_V26_1_1_8_RC2_V2_BUILD\work\resources\launcher_engine.ps1').Path
+          $gui=(Resolve-Path '.\_V26_1_1_8_RC2_V2_BUILD\work\resources\launcher_gui.ps1').Path
+          $cs=(Resolve-Path '.\_V26_1_1_8_RC2_V2_BUILD\work\launcher_v26.cs').Path
+          foreach($path in @($engine,$gui)){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw "PS5.1 parse failure: $path :: $($errors[0].Message)"}
+          }
+          $engineText=[IO.File]::ReadAllText($engine)
+          $guiText=[IO.File]::ReadAllText($gui)
+          $csText=[IO.File]::ReadAllText($cs)
+
+          foreach($needle in @('schema = 2','launcher_start_utc_ticks','game_launcher_start_utc_ticks','game_start_utc_ticks','--cleanup-runtime-watch','runtime\sessions','ReparsePoint')){
+            if(-not $engineText.Contains($needle)){throw "RC2 engine contract missing: $needle"}
+          }
+          if($engineText.Contains('schema = 1')){throw 'RC1 marker schema remains'}
+          if($engineText.Contains('Join-Path $runtimeStageRoot ("_AOTR_8P_WOTR_RUNTIME_V4_" + $PID)')){throw 'legacy V4 creation remains'}
+          if(-not $guiText.Contains('--cleanup-runtime-stale')){throw 'stale-only Auto-Repair cleanup missing'}
+          if($guiText.Contains('"--cleanup-runtime",')){throw 'unsafe zero-PID cleanup remains'}
+          if($guiText.Contains('Move-Item -LiteralPath $runtimePath -Destination $quarantine')){throw 'persistent quarantine remains'}
+          foreach($needle in @('RunRuntimeCleanupWatch','RunRuntimeCleanupStale','TryReadRuntimeSessionMarker','IsRecordedProcessAlive','RuntimeSessionRootComponentsSafe','CanDeleteRuntimeSessionNow','RuntimeLifecycleSelfTest','Path.GetDirectoryName(full)')){
+            if(-not $csText.Contains($needle)){throw "RC2 C# contract missing: $needle"}
+          }
+          foreach($forbidden in @('RunRuntimeCleanupHelper','WaitForPidExit','String.Equals(args[0], "--cleanup-runtime",')){
+            if($csText.Contains($forbidden)){throw "RC1 weak lifecycle primitive remains: $forbidden"}
+          }
+          Write-Host 'ISSUE84_RC2_V2_GENERATED_CONTRACT=PASS'
+
+      - name: Execute non-destructive lifecycle self-test
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\_V26_1_1_8_RC2_V2_BUILD\package\AotR 8P WotR Mod.exe').Path
+          $p=Start-Process -FilePath $exe -ArgumentList '--runtime-lifecycle-selftest' -WindowStyle Hidden -PassThru -Wait
+          if($p.ExitCode -ne 0){throw "Runtime lifecycle self-test failed with exit code $($p.ExitCode)"}
+          Write-Host 'ISSUE84_RC2_V2_LIFECYCLE_SELFTEST=PASS'
+
+      - name: Verify candidate identity and hosted Defender
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\_V26_1_1_8_RC2_V2_BUILD\package\AotR 8P WotR Mod.exe').Path
+          $fvi=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+          if($fvi.ProductVersion -ne '1.1.8'){throw "ProductVersion=$($fvi.ProductVersion)"}
+          $hash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          Write-Host "ISSUE84_SESSION_RC2_V2_EXE_SHA256=$hash"
+          $mp=@(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if(-not $mp){throw 'Windows Defender MpCmdRun.exe unavailable'}
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          if($LASTEXITCODE -ne 0){throw "Hosted Defender scan exit=$LASTEXITCODE"}
+          Write-Host 'ISSUE84_SESSION_RC2_V2_HOSTED_DEFENDER=PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-1.1.8-Issue84-Session-RC2-V2
+          path: |
+            _V26_1_1_8_RC2_V2_BUILD/package/**
+            _V26_1_1_8_RC2_V2_BUILD/SHA256SUMS.json
+            _V26_1_1_8_RC2_V2_BUILD/*.zip
+            _V26_1_1_8_RC2_V2_BUILD/*.sha256.txt
+            _V26_1_1_8_RC2_V2_BUILD/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 90
