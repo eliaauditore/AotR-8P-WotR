@@ -1,0 +1,105 @@
+name: Validate Signing Field Gate
+
+on:
+  pull_request:
+    paths:
+      - 'docs/CODE_SIGNING_POLICY.md'
+      - 'launcher-source/signing/**'
+      - '.github/workflows/verify-trusted-field-candidate.yml'
+      - '.github/workflows/validate-signing-field-gate.yml'
+  push:
+    branches:
+      - feature/trusted-signing-field-gate-89
+    paths:
+      - 'docs/CODE_SIGNING_POLICY.md'
+      - 'launcher-source/signing/**'
+      - '.github/workflows/verify-trusted-field-candidate.yml'
+      - '.github/workflows/validate-signing-field-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-signing-field-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse verifier with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = '.\launcher-source\signing\VERIFY_TRUSTED_FIELD_CANDIDATE.ps1'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors)
+          if (@($errors).Count -gt 0) {
+              $errors | Format-List *
+              throw 'Trusted field-candidate verifier has PowerShell 5.1 parser errors.'
+          }
+          Write-Host 'TRUSTED_FIELD_VERIFIER_PS51_PARSE=PASS'
+
+      - name: Require frozen public 1.1.6 identity
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
+          if ($manifest.launcher_version -ne '1.1.6') {
+              throw "Public manifest moved unexpectedly: $($manifest.launcher_version)"
+          }
+          $hash = (Get-FileHash -LiteralPath '.\AotR 8P WotR Mod.exe' -Algorithm SHA256).Hash
+          if ($hash -ne 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431') {
+              throw "Frozen public 1.1.6 EXE changed: $hash"
+          }
+          Write-Host 'TRUSTED_FIELD_PUBLIC_1_1_6_BOUNDARY=PASS'
+
+      - name: Prove unsigned public launcher cannot pass trusted field gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $caught = $null
+          try {
+              & '.\launcher-source\signing\VERIFY_TRUSTED_FIELD_CANDIDATE.ps1' `
+                  -ExePath '.\AotR 8P WotR Mod.exe' `
+                  -ExpectedSha256 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431' `
+                  -ExpectedProductVersion '1.1.6'
+          }
+          catch {
+              $caught = [string]$_.Exception.Message
+          }
+          if ([string]::IsNullOrWhiteSpace($caught)) {
+              throw 'Negative test failed: frozen unsigned launcher unexpectedly passed the trusted field gate.'
+          }
+          if ($caught -notlike 'TRUSTED_FIELD_CANDIDATE_GATE_FAIL:*Authenticode status is not Valid*') {
+              throw "Negative test failed for an unexpected reason: $caught"
+          }
+          Write-Host 'TRUSTED_FIELD_UNSIGNED_NEGATIVE_TEST=PASS'
+
+      - name: Static signing-policy contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $policy = Get-Content -LiteralPath '.\docs\CODE_SIGNING_POLICY.md' -Raw
+          foreach ($needle in @(
+              'Code signing policy',
+              'FIELD_CANDIDATE',
+              'Get-AuthenticodeSignature',
+              'signtool verify /pa /v',
+              'RSA',
+              'RFC 3161',
+              'Do not instruct maintainers or users to disable Smart App Control or Defender'
+          )) {
+              if (-not $policy.Contains($needle)) { throw "Signing policy contract missing: $needle" }
+          }
+
+          $workflow = Get-Content -LiteralPath '.\.github\workflows\verify-trusted-field-candidate.yml' -Raw
+          foreach ($needle in @(
+              'expected_sha256',
+              'expected_version',
+              'VERIFY_TRUSTED_FIELD_CANDIDATE.ps1',
+              'Hosted Defender scan of exact signed candidate'
+          )) {
+              if (-not $workflow.Contains($needle)) { throw "Manual verification workflow contract missing: $needle" }
+          }
+          Write-Host 'TRUSTED_FIELD_POLICY_CONTRACT=PASS'
