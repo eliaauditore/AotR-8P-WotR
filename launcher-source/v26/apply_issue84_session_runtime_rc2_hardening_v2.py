@@ -16,18 +16,49 @@ def load_base_module():
 
 def canonicalize_launcher_pid_anchor(path: Path) -> None:
     text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
-    pattern = re.compile(
-        r'(?m)^[ \t]*\$launcherPid = \$launcher\.Id[ \t]*\n'
-        r'[ \t]*Write-Host "lotrbfme2ep1\.exe PID: \$launcherPid" -ForegroundColor Green[ \t]*\n'
+
+    assign_pattern = re.compile(
+        r'(?m)^[ \t]*\$launcherPid[ \t]*=[ \t]*(?:\[int\][ \t]*)?\$launcher\.Id[ \t]*$'
     )
+    assign_matches = list(assign_pattern.finditer(text))
+    if len(assign_matches) != 1:
+        raise SystemExit(f"launcher PID assignment count={len(assign_matches)}")
+
+    log_pattern = re.compile(
+        r'(?m)^[ \t]*Write-Host[ \t]+["\']lotrbfme2ep1\.exe PID:[ ]*\$launcherPid["\'][ \t]+-ForegroundColor[ \t]+Green[ \t]*$'
+    )
+    log_matches = list(log_pattern.finditer(text))
+    if len(log_matches) > 1:
+        raise SystemExit(f"launcher PID log count={len(log_matches)}")
+
+    # Remove the pre-existing PID log wherever it occurs so the base RC2 patch
+    # receives exactly one stable two-line anchor. The log is presentation only.
+    if len(log_matches) == 1:
+        m = log_matches[0]
+        start = m.start()
+        end = m.end()
+        if end < len(text) and text[end] == "\n":
+            end += 1
+        text = text[:start] + text[end:]
+
+    assign_matches = list(assign_pattern.finditer(text))
+    if len(assign_matches) != 1:
+        raise SystemExit(f"launcher PID assignment after log normalization count={len(assign_matches)}")
+    m = assign_matches[0]
+    line_end = m.end()
+    if line_end < len(text) and text[line_end] == "\n":
+        line_end += 1
+
     canonical = (
         '$launcherPid = $launcher.Id\n'
         'Write-Host "lotrbfme2ep1.exe PID: $launcherPid" -ForegroundColor Green\n'
     )
-    text2, count = pattern.subn(canonical, text, count=1)
-    if count != 1:
-        raise SystemExit(f"launcher PID canonicalization count={count}")
-    path.write_text(text2, encoding="utf-8-sig", newline="\n")
+    text = text[:m.start()] + canonical + text[line_end:]
+
+    if text.count('$launcherPid = $launcher.Id\nWrite-Host "lotrbfme2ep1.exe PID: $launcherPid" -ForegroundColor Green\n') != 1:
+        raise SystemExit("canonical launcher PID anchor was not produced exactly once")
+
+    path.write_text(text, encoding="utf-8-sig", newline="\n")
 
 
 def main() -> None:
