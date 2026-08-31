@@ -63,7 +63,7 @@ try {
     if($patched -match '\$co\s*=\s*\(@\(& \$temp -CompileOnly 2>&1\)'){
         throw 'V3 STATIC CONTRACT FAILED: stale 2>&1 marker-capture gate remains. NOTHING EXECUTED.'
     }
-    if($patched -notmatch "& \$temp -CompileOnly" -or $patched -notmatch 'CAPTURE_COMPILEONLY_PASS'){
+    if(-not $patched.Contains('& $temp -CompileOnly') -or -not $patched.Contains('CAPTURE_COMPILEONLY_PASS')){
         throw 'V3 STATIC CONTRACT FAILED: replacement compile gate missing. NOTHING EXECUTED.'
     }
 
