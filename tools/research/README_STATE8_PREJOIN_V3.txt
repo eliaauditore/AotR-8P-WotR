@@ -1,0 +1,1 @@
+Use AOTR_WOTR_STATE8_PREJOIN_NATIVE_JOIN_ORCHESTRATOR_V3_PS51_FIX.ps1 for the next State8-before-native-join runtime experiment. V2 is retained as the pinned source but has three PS5.1 parser-invalid $Stage: interpolations and must not be invoked directly.
