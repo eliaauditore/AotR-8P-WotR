@@ -6,8 +6,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$AppKey = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\game.dat'
-$AppKeyNative = 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\game.dat'
+# game.dat is a 32-bit process on a 64-bit Windows guest. Microsoft documents
+# the WOW64 WER LocalDumps location for collecting dumps from 32-bit apps.
+$AppKey = 'HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\Windows Error Reporting\LocalDumps\game.dat'
+$AppKeyNative = 'HKLM\SOFTWARE\Wow6432Node\Microsoft\Windows\Windows Error Reporting\LocalDumps\game.dat'
 $ResearchRoot = Split-Path -Parent $DumpFolder
 $BackupReg = Join-Path $ResearchRoot 'WER_LocalDumps_game.dat_before_capture.reg'
 $Marker = Join-Path $ResearchRoot 'WER_LocalDumps_game.dat_before_capture.NONEXISTENT.txt'
@@ -36,6 +38,12 @@ function Restore-LocalDumps {
     }
 }
 
+if (-not [Environment]::Is64BitOperatingSystem) {
+    throw 'Expected a 64-bit Windows guest. NOTHING CHANGED.'
+}
+if (-not [Environment]::Is64BitProcess) {
+    throw 'Run this LocalDumps setup under normal 64-bit Windows PowerShell as Administrator. NOTHING CHANGED.'
+}
 if (-not (Is-Admin)) {
     throw 'ADMIN REQUIRED. Re-run Windows PowerShell as Administrator. NOTHING CHANGED.'
 }
@@ -56,7 +64,7 @@ if ($preExisting) {
     Write-Host 'PREEXISTING_LOCALDUMPS_APPKEY=YES'
 }
 else {
-    Set-Content -LiteralPath $Marker -Value 'Per-app LocalDumps key did not exist before this capture.' -Encoding ASCII
+    Set-Content -LiteralPath $Marker -Value 'Per-app WOW64 LocalDumps key did not exist before this capture.' -Encoding ASCII
     Write-Host 'PREEXISTING_LOCALDUMPS_APPKEY=NO'
 }
 
@@ -80,6 +88,8 @@ try {
     Write-Host '============================================================'
     Write-Host ' AOTR NATIVE TERRITORY WER LOCALDUMP CAPTURE V1'
     Write-Host '============================================================'
+    Write-Host 'WER_REGISTRY_VIEW=WOW64_32BIT'
+    Write-Host ('Registry   : {0}' -f $AppKeyNative)
     Write-Host ('DumpFolder : {0}' -f $DumpFolder)
     Write-Host 'DumpType   : 2 (full user-mode dump)'
     Write-Host 'DumpCount  : 5'
