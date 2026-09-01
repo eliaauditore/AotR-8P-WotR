@@ -1,0 +1,143 @@
+name: Research Signing-Clean V7 Materialization
+
+on:
+  push:
+    branches:
+      - research/signing-clean-v7-proof-92
+    paths:
+      - 'research/signing/materialize_signing_clean_v7_v2.py'
+      - 'research/signing/MATERIALIZE_SIGNING_CLEAN_V7_V1.ps1'
+      - 'launcher-source/v19-successor/resources/launcher_engine.ps1'
+      - 'launcher-source/v19-successor/resources/final_stable_v7.ps1'
+      - 'launcher-source/v19-successor/resources/v7_shellcode.bin'
+      - 'docs/release/SIGNING_CLEAN_V7_DESIGN.md'
+      - '.github/workflows/research-signing-clean-v7-materialize.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  materialize-clean-v7:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v5
+
+      - name: Compile-check Python materializer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m py_compile .\research\signing\materialize_signing_clean_v7_v2.py
+          if ($LASTEXITCODE -ne 0) { throw 'V2 materializer Python compile-check failed.' }
+          Write-Host 'SIGNING_CLEAN_V7_PYTHON_COMPILE=PASS'
+
+      - name: Materialize clean V7 resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'aotr8p-signing-clean-v7-v2'
+          python .\research\signing\materialize_signing_clean_v7_v2.py $out
+          if ($LASTEXITCODE -ne 0) { throw 'V2 materializer failed.' }
+          $report = Join-Path $out 'SIGNING_CLEAN_V7_MATERIALIZATION_REPORT.json'
+          if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'Materialization report missing.' }
+          "CLEAN_V7_ROOT=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'SIGNING_CLEAN_V7_MATERIALIZE_STEP=PASS'
+
+      - name: Parse generated Engine and FINAL with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($path in @(
+              (Join-Path $env:CLEAN_V7_ROOT 'launcher_engine_signing_clean.ps1'),
+              (Join-Path $env:CLEAN_V7_ROOT 'final_stable_v7_signing_clean.ps1')
+          )) {
+              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Generated source missing: $path" }
+              $tokens = $null
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+              if (@($errors).Count -gt 0) {
+                  $errors | Format-List *
+                  throw "Generated signing-clean V7 source fails PS5.1 parse: $path"
+              }
+          }
+          Write-Host 'SIGNING_CLEAN_V7_PS51_PARSE=PASS'
+
+      - name: Verify materialization report and clean boundary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:CLEAN_V7_ROOT 'SIGNING_CLEAN_V7_MATERIALIZATION_REPORT.json'
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if ($report.schema -ne 2) { throw "Unexpected report schema: $($report.schema)" }
+          if ($report.state -ne 'NON_RELEASE_SIGNING_CLEAN_V7_MATERIALIZATION') { throw "Unexpected report state: $($report.state)" }
+          if ($report.clean.shellcode_length -ne 1577) { throw "Clean shellcode length mismatch: $($report.clean.shellcode_length)" }
+          if ($report.clean.shellcode_prefix_sha256 -ne 'C2134A124371FD3DBB4BB7F5A20D46DE8CDAE3BF46EA6F248DD53A9488069811') { throw 'Clean semantic prefix hash mismatch.' }
+          if ($report.invariants.bytes_after_offset_12_unchanged -ne $true) { throw 'Unexpected shellcode mutation after offset 12.' }
+          if ($report.invariants.forbidden_historical_windows_absent_from_clean_shellcode -ne $true) { throw 'Forbidden historical window scan did not pass.' }
+          if ($report.invariants.engine_uses_hash_compatibility_windows -ne $true) { throw 'Engine hash-window invariant missing.' }
+          if ($report.invariants.final_uses_hash_compatibility_windows -ne $true) { throw 'FINAL hash-window invariant missing.' }
+          if ($report.invariants.public_release_modified -ne $false) { throw 'Research proof claims public release mutation.' }
+          if ($report.invariants.field_execution_allowed -ne $false) { throw 'Research proof must not authorize field execution.' }
+
+          $engine = Get-Content -LiteralPath (Join-Path $env:CLEAN_V7_ROOT 'launcher_engine_signing_clean.ps1') -Raw
+          $final = Get-Content -LiteralPath (Join-Path $env:CLEAN_V7_ROOT 'final_stable_v7_signing_clean.ps1') -Raw
+          foreach ($token in @('$OriginalRawWheelHook','$OriginalMapHandler','$OriginalZoomUpdate','$ExpectedCameraGlobalRef','$ExpectedCancelRelease')) {
+              if ($engine.Contains($token) -or $final.Contains($token)) { throw "Removed proprietary-byte variable survived in clean source: $token" }
+          }
+          foreach ($name in @('V7 Raw Wheel Hook','V7 Strategic Map Handler','V7 Zoom Update','LivingWorld Camera Global Reference','Strategic Cancel/Release Callback')) {
+              if ($engine -match ('(?m)^Assert-CompatBytes .*?-Name "' + [regex]::Escape($name) + '"')) {
+                  throw "Engine still uses literal byte gate for $name"
+              }
+          }
+          Write-Host 'SIGNING_CLEAN_V7_BOUNDARY_GATE=PASS'
+
+      - name: Prove semantic prefix contract mathematically
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import ctypes
+          import random
+
+          def expected(value):
+              hi = (value >> 16) & 0xFFFF
+              return ctypes.c_int16(hi).value
+
+          def clean_semantics(value):
+              # movsx word ptr [ebp-2] is the signed high 16-bit word of the same little-endian dword.
+              return ctypes.c_int16((value >> 16) & 0xFFFF).value
+
+          cases = [0, 1, 0x00007FFF, 0x00008000, 0x7FFF0000, 0x80000000, 0xFFFF0000, 0xFFFFFFFF]
+          random.seed(0xA08F92)
+          cases.extend(random.getrandbits(32) for _ in range(10000))
+          for value in cases:
+              if expected(value) != clean_semantics(value):
+                  raise SystemExit(f"semantic mismatch for 0x{value:08X}")
+          print('SIGNING_CLEAN_V7_SEMANTIC_VALUE_GATE=PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Semantic equivalence value gate failed.' }
+
+      - name: Prove repository stayed clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          dirty="$(git status --porcelain)"
+          if [[ -n "$dirty" ]]; then
+            printf '%s\n' "$dirty"
+            echo 'Materializer mutated the checked-out repository.' >&2
+            exit 1
+          fi
+          echo 'SIGNING_CLEAN_V7_REPO_CLEAN=PASS'
+
+      - name: Upload research resources and report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-clean-v7-materialization-v2
+          path: |
+            ${{ env.CLEAN_V7_ROOT }}/launcher_engine_signing_clean.ps1
+            ${{ env.CLEAN_V7_ROOT }}/final_stable_v7_signing_clean.ps1
+            ${{ env.CLEAN_V7_ROOT }}/v7_shellcode_signing_clean.bin
+            ${{ env.CLEAN_V7_ROOT }}/SIGNING_CLEAN_V7_MATERIALIZATION_REPORT.json
+          if-no-files-found: error
+          retention-days: 90
