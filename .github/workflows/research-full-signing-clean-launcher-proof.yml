@@ -1,0 +1,237 @@
+name: Research Full Signing-Clean Launcher Proof
+
+on:
+  push:
+    branches:
+      - research/signing-clean-v7-proof-92
+    paths:
+      - 'research/signing/materialize_signing_clean_v7_v2.py'
+      - 'research/signing/materialize_signing_clean_v7_v3.py'
+      - 'research/signing/materialize_signing_clean_v7_v4.py'
+      - 'research/signing/prepare_full_signing_clean_builder_v1.py'
+      - 'launcher-source/v19-successor/BUILD_SIGNING_CLEAN_VISUAL_PROOF_V3.ps1'
+      - 'launcher-source/v19-successor/resources/launcher_gui.ps1'
+      - 'launcher-source/v19-successor/resources/launcher_engine.ps1'
+      - 'launcher-source/v19-successor/resources/final_stable_v7.ps1'
+      - 'launcher-source/v19-successor/resources/v7_shellcode.bin'
+      - 'launcher-source/v19/launcher.cs'
+      - '.github/workflows/research-full-signing-clean-launcher-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-signing-clean-proof:
+    runs-on: windows-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v5
+
+      - name: Syntax-check proof preparation chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          from pathlib import Path
+          paths = (
+              "research/signing/materialize_signing_clean_v7_v2.py",
+              "research/signing/materialize_signing_clean_v7_v3.py",
+              "research/signing/materialize_signing_clean_v7_v4.py",
+              "research/signing/prepare_full_signing_clean_builder_v1.py",
+          )
+          for path in paths:
+              compile(Path(path).read_text(encoding="utf-8"), path, "exec")
+          print("FULL_SIGNING_CLEAN_PYTHON_SYNTAX=PASS")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Full proof Python syntax gate failed.' }
+
+      - name: Materialize exact V4 clean resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cleanV7 = Join-Path $env:RUNNER_TEMP 'aotr8p-full-clean-v7'
+          python .\research\signing\materialize_signing_clean_v7_v4.py $cleanV7
+          if ($LASTEXITCODE -ne 0) { throw 'Canonical V4 materialization failed.' }
+
+          $stage = Join-Path $env:RUNNER_TEMP 'aotr8p-full-clean-resources'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -LiteralPath '.\launcher-source\v19-successor\resources\launcher_gui.ps1' -Destination (Join-Path $stage 'launcher_gui.ps1') -Force
+          Copy-Item -LiteralPath (Join-Path $cleanV7 'launcher_engine_signing_clean.ps1') -Destination (Join-Path $stage 'launcher_engine.ps1') -Force
+          Copy-Item -LiteralPath (Join-Path $cleanV7 'final_stable_v7_signing_clean.ps1') -Destination (Join-Path $stage 'final_stable_v7.ps1') -Force
+          Copy-Item -LiteralPath (Join-Path $cleanV7 'v7_shellcode_signing_clean.bin') -Destination (Join-Path $stage 'v7_shellcode.bin') -Force
+
+          $expected = @{
+              'launcher_gui.ps1'    = '135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD'
+              'launcher_engine.ps1' = '51AE0E2312F07065119DCA806A2211373F48366F7CC6DD520130751EA34D14C1'
+              'final_stable_v7.ps1' = '125A29EEFE6DF8C38467BDFBA3502118A041B0243A1B72903D969356CA33F49C'
+              'v7_shellcode.bin'    = '3C4B4B8B4E80B49877C1ADD090A8C96B94A361C8295B1DB9F4BC78CA7454AF4C'
+          }
+          foreach ($name in $expected.Keys) {
+              $actual = (Get-FileHash -LiteralPath (Join-Path $stage $name) -Algorithm SHA256).Hash
+              if ($actual -ne $expected[$name]) { throw "Staged clean resource mismatch: $name expected=$($expected[$name]) actual=$actual" }
+          }
+
+          "CLEAN_V7_ROOT=$cleanV7" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AOTR8P_CLEAN_RESOURCES_ROOT=$stage" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'FULL_SIGNING_CLEAN_RESOURCE_STAGE=PASS'
+
+      - name: Prepare temporary combined builder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $builder = Join-Path $env:RUNNER_TEMP 'BUILD_FULL_SIGNING_CLEAN_PROOF.ps1'
+          python .\research\signing\prepare_full_signing_clean_builder_v1.py $builder
+          if ($LASTEXITCODE -ne 0) { throw 'Combined builder preparation failed.' }
+          if (-not (Test-Path -LiteralPath $builder -PathType Leaf)) { throw 'Combined builder missing.' }
+          "FULL_CLEAN_BUILDER=$builder" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FULL_CLEAN_PREP_REPORT=$builder.prep.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'FULL_SIGNING_CLEAN_BUILDER_PREP_STEP=PASS'
+
+      - name: Parse generated combined builder with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($env:FULL_CLEAN_BUILDER,[ref]$tokens,[ref]$errors)
+          if (@($errors).Count -gt 0) {
+              $errors | Format-List *
+              throw 'Generated full signing-clean builder fails Windows PowerShell 5.1 parse.'
+          }
+          Write-Host 'FULL_SIGNING_CLEAN_BUILDER_PS51_PARSE=PASS'
+
+      - name: Build combined non-release proof
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proof = Join-Path $env:RUNNER_TEMP 'aotr8p-full-signing-clean-proof'
+          & $env:FULL_CLEAN_BUILDER -OutputRoot $proof -LauncherVersion '1.1.3-signingclean-fullproof1'
+          $exe = Join-Path $proof 'AotR 8P WotR Mod SIGNING CLEAN VISUAL PROOF.exe'
+          $visualReport = Join-Path $proof 'SIGNING_CLEAN_VISUAL_PROOF_REPORT.json'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Combined proof EXE missing.' }
+          if (-not (Test-Path -LiteralPath $visualReport -PathType Leaf)) { throw 'Combined visual proof report missing.' }
+          "FULL_CLEAN_PROOF_ROOT=$proof" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FULL_CLEAN_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FULL_CLEAN_VISUAL_REPORT=$visualReport" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'FULL_SIGNING_CLEAN_BUILD=PASS'
+
+      - name: Verify combined report and embedded resource identities
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $visual = Get-Content -LiteralPath $env:FULL_CLEAN_VISUAL_REPORT -Raw | ConvertFrom-Json
+          if ($visual.launcher_version -ne '1.1.3-signingclean-fullproof1') { throw "Unexpected proof version: $($visual.launcher_version)" }
+          if ($visual.gui_sha256 -ne '135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD') { throw 'Combined GUI hash mismatch.' }
+          if ($visual.engine_sha256 -ne '51AE0E2312F07065119DCA806A2211373F48366F7CC6DD520130751EA34D14C1') { throw 'Combined Engine hash mismatch.' }
+          if ($visual.final_stable_v7_sha256 -ne '125A29EEFE6DF8C38467BDFBA3502118A041B0243A1B72903D969356CA33F49C') { throw 'Combined FINAL hash mismatch.' }
+          if ($visual.v7_shellcode_sha256 -ne '3C4B4B8B4E80B49877C1ADD090A8C96B94A361C8295B1DB9F4BC78CA7454AF4C') { throw 'Combined shellcode hash mismatch.' }
+          if ($visual.historical_visual_files_used_as_build_inputs -ne $false) { throw 'Historical visual build inputs leaked into combined proof.' }
+          if ($visual.custom_pe_icon_embedded -ne $false) { throw 'Custom historical icon leaked into combined proof.' }
+          if ($visual.public_release_modified -ne $false) { throw 'Combined proof claims public release mutation.' }
+          if ($visual.field_execution_allowed -ne $false) { throw 'Unsigned combined proof must not authorize field execution.' }
+
+          function Get-EmbeddedBytes([Reflection.Assembly]$Assembly,[string]$Name) {
+              $stream = $Assembly.GetManifestResourceStream($Name)
+              if ($null -eq $stream) { throw "Embedded resource missing: $Name" }
+              try {
+                  $ms = New-Object IO.MemoryStream
+                  try { $stream.CopyTo($ms); return [byte[]]$ms.ToArray() }
+                  finally { $ms.Dispose() }
+              }
+              finally { $stream.Dispose() }
+          }
+          function Get-BytesSha([byte[]]$Bytes) {
+              $sha = [Security.Cryptography.SHA256]::Create()
+              try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToUpperInvariant() }
+              finally { $sha.Dispose() }
+          }
+
+          $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($env:FULL_CLEAN_EXE))
+          $engineBytes = Get-EmbeddedBytes $asm 'AotR8P.EngineScript'
+          $finalBytes = Get-EmbeddedBytes $asm 'AotR8P.FinalStableV7'
+          $shellBytes = Get-EmbeddedBytes $asm 'AotR8P.V7Shellcode'
+          if ((Get-BytesSha $engineBytes) -ne '51AE0E2312F07065119DCA806A2211373F48366F7CC6DD520130751EA34D14C1') { throw 'Embedded clean Engine mismatch.' }
+          $embeddedFinalHash = Get-BytesSha $finalBytes
+          if ($embeddedFinalHash -ne '125A29EEFE6DF8C38467BDFBA3502118A041B0243A1B72903D969356CA33F49C') { throw 'Embedded clean FINAL mismatch.' }
+          if ((Get-BytesSha $shellBytes) -ne '3C4B4B8B4E80B49877C1ADD090A8C96B94A361C8295B1DB9F4BC78CA7454AF4C') { throw 'Embedded clean shellcode mismatch.' }
+
+          $engineText = [Text.Encoding]::UTF8.GetString($engineBytes).TrimStart([char]0xFEFF)
+          $match = [regex]::Match($engineText,'(?m)^\$FinalStableV7Sha256\s*=\s*"([A-Fa-f0-9]{64})"\s*$')
+          if (-not $match.Success) { throw 'Embedded Engine FINAL hash constant missing.' }
+          if ($match.Groups[1].Value.ToUpperInvariant() -ne $embeddedFinalHash) { throw 'Embedded Engine -> FINAL hash binding mismatch.' }
+
+          $exeHash = (Get-FileHash -LiteralPath $env:FULL_CLEAN_EXE -Algorithm SHA256).Hash
+          $exeSize = (Get-Item -LiteralPath $env:FULL_CLEAN_EXE).Length
+          $evidence = [ordered]@{
+              schema = 1
+              state = 'NON_RELEASE_FULL_SIGNING_CLEAN_HOSTED_PROOF'
+              launcher_version = '1.1.3-signingclean-fullproof1'
+              exe_sha256 = $exeHash
+              exe_size = $exeSize
+              gui_sha256 = $visual.gui_sha256
+              engine_sha256 = $visual.engine_sha256
+              final_stable_v7_sha256 = $visual.final_stable_v7_sha256
+              engine_expected_final_sha256 = $embeddedFinalHash
+              v7_shellcode_sha256 = $visual.v7_shellcode_sha256
+              neutral_skin_sha256 = $visual.generated_visual_hashes.'AotR8P.LauncherSkin'
+              neutral_overlay_sha256 = $visual.generated_visual_hashes.'AotR8P.Row1Patch'
+              historical_visual_files_used_as_build_inputs = $false
+              custom_pe_icon_embedded = $false
+              embedded_cross_resource_gate = $true
+              public_release_modified = $false
+              field_execution_allowed = $false
+              unsigned_exe_uploaded = $false
+          }
+          $evidencePath = Join-Path $env:FULL_CLEAN_PROOF_ROOT 'FULL_SIGNING_CLEAN_PROOF_REPORT.json'
+          $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+          "FULL_CLEAN_EVIDENCE=$evidencePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "FULL_SIGNING_CLEAN_EMBEDDED_GATE=PASS"
+          Write-Host "FULL_SIGNING_CLEAN_EXE_SHA256=$exeHash"
+          Write-Host "FULL_SIGNING_CLEAN_EXE_SIZE=$exeSize"
+
+      - name: Hosted Defender scan exact proof EXE
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $mp = @(
+              "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+              "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1
+          if (-not $mp) { throw 'Windows Defender MpCmdRun.exe unavailable.' }
+          $scanLines = @(& $mp.FullName -Scan -ScanType 3 -File $env:FULL_CLEAN_EXE -DisableRemediation 2>&1 | ForEach-Object { [string]$_ })
+          $scanExit = $LASTEXITCODE
+          $scanPath = Join-Path $env:FULL_CLEAN_PROOF_ROOT 'DEFENDER_SCAN.txt'
+          $scanLines | Set-Content -LiteralPath $scanPath -Encoding UTF8
+          if ($scanExit -ne 0) { throw "Hosted Defender scan failed with exit=$scanExit" }
+          "FULL_CLEAN_DEFENDER=$scanPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'FULL_SIGNING_CLEAN_DEFENDER=PASS'
+
+      - name: Prove repository stayed clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          dirty="$(git status --porcelain)"
+          if [[ -n "$dirty" ]]; then
+            printf '%s\n' "$dirty"
+            echo 'Full signing-clean proof mutated the checked-out repository.' >&2
+            exit 1
+          fi
+          echo 'FULL_SIGNING_CLEAN_REPO_CLEAN=PASS'
+
+      - name: Upload evidence only — never the unsigned proof EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-signing-clean-launcher-proof-evidence
+          path: |
+            ${{ env.FULL_CLEAN_EVIDENCE }}
+            ${{ env.FULL_CLEAN_DEFENDER }}
+            ${{ env.FULL_CLEAN_VISUAL_REPORT }}
+            ${{ env.FULL_CLEAN_PREP_REPORT }}
+            ${{ env.CLEAN_V7_ROOT }}/SIGNING_CLEAN_V7_MATERIALIZATION_REPORT.json
+          if-no-files-found: error
+          retention-days: 90
