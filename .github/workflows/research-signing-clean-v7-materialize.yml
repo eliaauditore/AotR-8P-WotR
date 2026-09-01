@@ -20,19 +20,27 @@ permissions:
 jobs:
   materialize-clean-v7:
     runs-on: windows-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Checkout research branch
         uses: actions/checkout@v5
 
-      - name: Compile-check canonical V3 materializer chain
+      - name: Compile-check canonical V3 materializer chain without pycache
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python -m py_compile `
-            .\research\signing\materialize_signing_clean_v7_v2.py `
-            .\research\signing\materialize_signing_clean_v7_v3.py
+          @'
+          from pathlib import Path
+          paths = (
+              "research/signing/materialize_signing_clean_v7_v2.py",
+              "research/signing/materialize_signing_clean_v7_v3.py",
+          )
+          for path in paths:
+              compile(Path(path).read_text(encoding="utf-8"), path, "exec")
+          print("SIGNING_CLEAN_V7_PYTHON_COMPILE=PASS")
+          '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'V3 materializer Python compile-check failed.' }
-          Write-Host 'SIGNING_CLEAN_V7_PYTHON_COMPILE=PASS'
 
       - name: Materialize complete signing-clean V7 resources
         shell: pwsh
@@ -119,7 +127,6 @@ jobs:
               return ctypes.c_int16(shifted & 0xFFFF).value
 
           def clean_raw(value):
-              # LEA+MOV loads the same dword; SHR 16 is identical; CWDE sign-extends AX.
               eax = value & 0xFFFFFFFF
               eax >>= 16
               return ctypes.c_int16(eax & 0xFFFF).value
@@ -131,10 +138,6 @@ jobs:
               if original_raw(value) != clean_raw(value):
                   raise SystemExit(f"Raw Wheel semantic mismatch for 0x{value:08X}")
 
-          # Camera replacement contract:
-          # original MOV ECX,[abs] => ECX=loaded and flags unchanged;
-          # clean MOV EAX,[abs]; XCHG EAX,ECX => ECX=loaded and flags unchanged.
-          # EAX is intentionally dead at all three characterized sites before reload/popa.
           for old_ecx in (0, 1, 0x12345678, 0xFFFFFFFF):
               for loaded in (0, 1, 0x10203040, 0xFFFFFFFF):
                   original_ecx = loaded
