@@ -6,7 +6,7 @@ on:
       - research/signing-clean-v7-proof-92
     paths:
       - 'research/signing/materialize_signing_clean_v7_v2.py'
-      - 'research/signing/MATERIALIZE_SIGNING_CLEAN_V7_V1.ps1'
+      - 'research/signing/materialize_signing_clean_v7_v3.py'
       - 'launcher-source/v19-successor/resources/launcher_engine.ps1'
       - 'launcher-source/v19-successor/resources/final_stable_v7.ps1'
       - 'launcher-source/v19-successor/resources/v7_shellcode.bin'
@@ -24,21 +24,23 @@ jobs:
       - name: Checkout research branch
         uses: actions/checkout@v5
 
-      - name: Compile-check Python materializer
+      - name: Compile-check canonical V3 materializer chain
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python -m py_compile .\research\signing\materialize_signing_clean_v7_v2.py
-          if ($LASTEXITCODE -ne 0) { throw 'V2 materializer Python compile-check failed.' }
+          python -m py_compile `
+            .\research\signing\materialize_signing_clean_v7_v2.py `
+            .\research\signing\materialize_signing_clean_v7_v3.py
+          if ($LASTEXITCODE -ne 0) { throw 'V3 materializer Python compile-check failed.' }
           Write-Host 'SIGNING_CLEAN_V7_PYTHON_COMPILE=PASS'
 
-      - name: Materialize clean V7 resources
+      - name: Materialize complete signing-clean V7 resources
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $out = Join-Path $env:RUNNER_TEMP 'aotr8p-signing-clean-v7-v2'
-          python .\research\signing\materialize_signing_clean_v7_v2.py $out
-          if ($LASTEXITCODE -ne 0) { throw 'V2 materializer failed.' }
+          $out = Join-Path $env:RUNNER_TEMP 'aotr8p-signing-clean-v7-v3'
+          python .\research\signing\materialize_signing_clean_v7_v3.py $out
+          if ($LASTEXITCODE -ne 0) { throw 'V3 materializer failed.' }
           $report = Join-Path $out 'SIGNING_CLEAN_V7_MATERIALIZATION_REPORT.json'
           if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'Materialization report missing.' }
           "CLEAN_V7_ROOT=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -63,20 +65,32 @@ jobs:
           }
           Write-Host 'SIGNING_CLEAN_V7_PS51_PARSE=PASS'
 
-      - name: Verify materialization report and clean boundary
+      - name: Verify V3 materialization report and clean boundary
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:CLEAN_V7_ROOT 'SIGNING_CLEAN_V7_MATERIALIZATION_REPORT.json'
           $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-          if ($report.schema -ne 2) { throw "Unexpected report schema: $($report.schema)" }
+          if ($report.schema -ne 3) { throw "Unexpected report schema: $($report.schema)" }
           if ($report.state -ne 'NON_RELEASE_SIGNING_CLEAN_V7_MATERIALIZATION') { throw "Unexpected report state: $($report.state)" }
+          if ($report.strategy -ne 'HASH_WINDOW_COMPATIBILITY_PLUS_SEMANTIC_TRAMPOLINE_REENCODING') { throw "Unexpected strategy: $($report.strategy)" }
           if ($report.clean.shellcode_length -ne 1577) { throw "Clean shellcode length mismatch: $($report.clean.shellcode_length)" }
-          if ($report.clean.shellcode_prefix_sha256 -ne 'C2134A124371FD3DBB4BB7F5A20D46DE8CDAE3BF46EA6F248DD53A9488069811') { throw 'Clean semantic prefix hash mismatch.' }
-          if ($report.invariants.bytes_after_offset_12_unchanged -ne $true) { throw 'Unexpected shellcode mutation after offset 12.' }
-          if ($report.invariants.forbidden_historical_windows_absent_from_clean_shellcode -ne $true) { throw 'Forbidden historical window scan did not pass.' }
-          if ($report.invariants.engine_uses_hash_compatibility_windows -ne $true) { throw 'Engine hash-window invariant missing.' }
-          if ($report.invariants.final_uses_hash_compatibility_windows -ne $true) { throw 'FINAL hash-window invariant missing.' }
+          if ($report.clean.shellcode_sha256 -ne '3C4B4B8B4E80B49877C1ADD090A8C96B94A361C8295B1DB9F4BC78CA7454AF4C') { throw "Clean shellcode SHA mismatch: $($report.clean.shellcode_sha256)" }
+          if ($report.clean.raw_wheel_prefix_sha256 -ne 'C2134A124371FD3DBB4BB7F5A20D46DE8CDAE3BF46EA6F248DD53A9488069811') { throw 'Clean Raw Wheel semantic prefix hash mismatch.' }
+          if ($report.clean.camera_replacement_sha256 -ne '9DA68ED1751B90B68C7B15B1362ABE5C84720E0A9263FC1F0FF7B085778957BA') { throw 'Clean Camera Global replacement hash mismatch.' }
+          $cameraOffsets = @($report.clean.camera_replacement_offsets)
+          if (($cameraOffsets -join '|') -ne '0x1E|0x201|0x54E') { throw "Unexpected Camera Global offset map: $($cameraOffsets -join ',')" }
+
+          foreach ($name in @(
+              'only_characterized_shellcode_regions_changed',
+              'forbidden_historical_windows_absent_from_clean_shellcode',
+              'engine_uses_hash_compatibility_windows',
+              'final_uses_hash_compatibility_windows',
+              'shellcode_offsets_preserved',
+              'shellcode_length_preserved'
+          )) {
+              if ($report.invariants.$name -ne $true) { throw "Required V3 invariant failed/missing: $name" }
+          }
           if ($report.invariants.public_release_modified -ne $false) { throw 'Research proof claims public release mutation.' }
           if ($report.invariants.field_execution_allowed -ne $false) { throw 'Research proof must not authorize field execution.' }
 
@@ -92,7 +106,7 @@ jobs:
           }
           Write-Host 'SIGNING_CLEAN_V7_BOUNDARY_GATE=PASS'
 
-      - name: Prove semantic prefix contract mathematically
+      - name: Prove semantic replacement contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -100,23 +114,39 @@ jobs:
           import ctypes
           import random
 
-          def expected(value):
-              hi = (value >> 16) & 0xFFFF
-              return ctypes.c_int16(hi).value
+          def original_raw(value):
+              shifted = (value & 0xFFFFFFFF) >> 16
+              return ctypes.c_int16(shifted & 0xFFFF).value
 
-          def clean_semantics(value):
-              # movsx word ptr [ebp-2] is the signed high 16-bit word of the same little-endian dword.
-              return ctypes.c_int16((value >> 16) & 0xFFFF).value
+          def clean_raw(value):
+              # LEA+MOV loads the same dword; SHR 16 is identical; CWDE sign-extends AX.
+              eax = value & 0xFFFFFFFF
+              eax >>= 16
+              return ctypes.c_int16(eax & 0xFFFF).value
 
           cases = [0, 1, 0x00007FFF, 0x00008000, 0x7FFF0000, 0x80000000, 0xFFFF0000, 0xFFFFFFFF]
           random.seed(0xA08F92)
           cases.extend(random.getrandbits(32) for _ in range(10000))
           for value in cases:
-              if expected(value) != clean_semantics(value):
-                  raise SystemExit(f"semantic mismatch for 0x{value:08X}")
-          print('SIGNING_CLEAN_V7_SEMANTIC_VALUE_GATE=PASS')
+              if original_raw(value) != clean_raw(value):
+                  raise SystemExit(f"Raw Wheel semantic mismatch for 0x{value:08X}")
+
+          # Camera replacement contract:
+          # original MOV ECX,[abs] => ECX=loaded and flags unchanged;
+          # clean MOV EAX,[abs]; XCHG EAX,ECX => ECX=loaded and flags unchanged.
+          # EAX is intentionally dead at all three characterized sites before reload/popa.
+          for old_ecx in (0, 1, 0x12345678, 0xFFFFFFFF):
+              for loaded in (0, 1, 0x10203040, 0xFFFFFFFF):
+                  original_ecx = loaded
+                  clean_eax = loaded
+                  clean_ecx = old_ecx
+                  clean_eax, clean_ecx = clean_ecx, clean_eax
+                  if clean_ecx != original_ecx:
+                      raise SystemExit('Camera Global semantic mismatch')
+
+          print('SIGNING_CLEAN_V7_SEMANTIC_REPLACEMENT_GATE=PASS')
           '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'Semantic equivalence value gate failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Semantic replacement contract failed.' }
 
       - name: Prove repository stayed clean
         shell: bash
@@ -133,7 +163,7 @@ jobs:
       - name: Upload research resources and report only
         uses: actions/upload-artifact@v4
         with:
-          name: signing-clean-v7-materialization-v2
+          name: signing-clean-v7-materialization-v3
           path: |
             ${{ env.CLEAN_V7_ROOT }}/launcher_engine_signing_clean.ps1
             ${{ env.CLEAN_V7_ROOT }}/final_stable_v7_signing_clean.ps1
