@@ -1,32 +1,52 @@
-name: Build launcher 1.16.1 UX RC
+name: Build / promote launcher 1.16.1
 
 on:
   pull_request:
     branches: [ main ]
     paths:
       - 'launcher-source/v24/**'
+      - 'launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V24_FINAL_1_16_1.ps1'
+      - 'AotR 8P WotR Mod.exe'
+      - 'manifest.json'
+      - 'repair-manifest.json'
+      - '.github/workflows/build-launcher-1-16-1-ux-rc.yml'
+  push:
+    branches:
+      - release/launcher-1.16.1-public
+    paths:
       - '.github/workflows/build-launcher-1-16-1-ux-rc.yml'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-and-verify:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Build exact 1.1.6-based 1.16.1 candidate
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
           $out = Join-Path $env:RUNNER_TEMP 'aotr-1.16.1-ux-rc'
-          & '.\launcher-source\v24\BUILD_LAUNCHER_1_16_1_UX_CANDIDATE.ps1' -OutputRoot $out -LauncherVersion '1.16.1'
+          & '.\launcher-source\BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V24_FINAL_1_16_1.ps1' -OutputRoot $out
           if ($LASTEXITCODE -ne 0) { throw "Builder failed with exit code $LASTEXITCODE" }
           $exe = Join-Path $out 'package\AotR 8P WotR Mod.exe'
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Candidate EXE missing' }
+          $expected = 'BFBD459F798E88C4E5EDA803E071AACB24CF719AA0B6A321EBAD9CAB81B6223B'
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
+          if ($actual -ne $expected) { throw "Candidate identity mismatch: expected $expected got $actual" }
           "CANDIDATE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "CANDIDATE_SHA256=$actual"
 
       - name: Verify version and exact embedded boundaries
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
           $exe = $env:CANDIDATE_EXE
           $fvi = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
           if ($fvi.ProductVersion -ne '1.16.1') { throw "ProductVersion mismatch: $($fvi.ProductVersion)" }
@@ -68,28 +88,116 @@ jobs:
             if ($gui.IndexOf($required,[StringComparison]::Ordinal) -lt 0) { throw "GUI contract missing: $required" }
           }
           if ($gui.IndexOf('A8P-RUNTIME-FS-001',[StringComparison]::Ordinal) -lt 0) { throw 'Existing runtime error classification disappeared' }
-
-          $candidateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
           Write-Host "PRODUCT_VERSION=$($fvi.ProductVersion)"
           Write-Host "FILE_VERSION=$($fvi.FileVersion)"
           Write-Host "ENGINE_SHA256=$engineHash"
           Write-Host "GUI_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $guiPath).Hash)"
-          Write-Host "CANDIDATE_SHA256=$candidateHash"
 
-      - name: Verify public release remains frozen
+      - name: Verify pre-promotion public boundary
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release/launcher-1.16.1-public'
         shell: powershell
         run: |
-          $public = 'AotR 8P WotR Mod.exe'
-          $publicHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $public).Hash
-          $expected = 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431'
-          if ($publicHash -ne $expected) { throw "Public 1.1.6 changed: $publicHash" }
-          $manifest = Get-Content -LiteralPath 'manifest.json' -Raw | ConvertFrom-Json
-          if ([string]$manifest.launcher_version -ne '1.1.6') { throw "Public manifest version changed: $($manifest.launcher_version)" }
-          if ([string]$manifest.launcher_sha256 -ne $expected) { throw 'Public manifest launcher hash changed' }
-          Write-Host 'PUBLIC_1_1_6_FROZEN_PASS'
+          $ErrorActionPreference = 'Stop'
+          $old = 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431'
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath '.\AotR 8P WotR Mod.exe').Hash
+          if ($actual -ne $old) { throw "Expected frozen public 1.1.6 donor before promotion, got $actual" }
+          $manifest = Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
+          if ([string]$manifest.launcher_version -ne '1.1.6') { throw "Expected manifest 1.1.6 before promotion, got $($manifest.launcher_version)" }
+          if ([string]$manifest.launcher_sha256 -ne $old) { throw 'Frozen public 1.1.6 manifest hash mismatch' }
+          Write-Host 'PUBLIC_1_1_6_PREPROMOTION_BOUNDARY=PASS'
 
-      - name: RC classification
+      - name: Hosted Defender gate for exact public candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release/launcher-1.16.1-public'
         shell: powershell
         run: |
-          Write-Host 'RC_BUILD_PASS'
-          Write-Host 'Unsigned candidate is CI evidence only and is not promoted to FIELD_CANDIDATE or public manifest by this workflow.'
+          $ErrorActionPreference = 'Stop'
+          $exe = $env:CANDIDATE_EXE
+          $mp = @(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $mp) { throw 'MpCmdRun.exe not found on hosted runner' }
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          if ($LASTEXITCODE -notin @(0,2)) { throw "Defender scan failed with exit code $LASTEXITCODE" }
+          $threats = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.Resources -match [regex]::Escape($exe) })
+          if ($threats.Count -gt 0) {
+            $threats | Format-List *
+            throw 'Defender detected the exact 1.16.1 public candidate'
+          }
+          Write-Host 'PUBLIC_DEFENDER_GATE=SCANNED_CLEAN'
+
+      - name: Stage public 1.16.1 release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release/launcher-1.16.1-public'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = 'BFBD459F798E88C4E5EDA803E071AACB24CF719AA0B6A321EBAD9CAB81B6223B'
+          Copy-Item -LiteralPath $env:CANDIDATE_EXE -Destination '.\AotR 8P WotR Mod.exe' -Force
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath '.\AotR 8P WotR Mod.exe').Hash
+          if ($actual -ne $expected) { throw "Staged public EXE mismatch: $actual" }
+
+          $manifest = Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
+          $manifest.launcher_version = '1.16.1'
+          $manifest.launcher_sha256 = $expected
+          $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath '.\manifest.json' -Encoding UTF8
+
+          $repair = Get-Content -LiteralPath '.\repair-manifest.json' -Raw | ConvertFrom-Json
+          $repair.generated_for_launcher = '1.16.1'
+          $repair | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath '.\repair-manifest.json' -Encoding UTF8
+
+      - name: Pre-commit public consistency gate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release/launcher-1.16.1-public'
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib, json
+          root = Path('.')
+          expected = 'BFBD459F798E88C4E5EDA803E071AACB24CF719AA0B6A321EBAD9CAB81B6223B'
+          manifest = json.loads((root/'manifest.json').read_text(encoding='utf-8-sig'))
+          repair = json.loads((root/'repair-manifest.json').read_text(encoding='utf-8-sig'))
+          actual = hashlib.sha256((root/'AotR 8P WotR Mod.exe').read_bytes()).hexdigest().upper()
+          assert manifest['launcher_version'] == '1.16.1'
+          assert manifest['launcher_sha256'] == expected
+          assert repair['generated_for_launcher'] == '1.16.1'
+          assert actual == expected
+          assert (root/'launcher-source'/'BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V24_FINAL_1_16_1.ps1').is_file()
+          print('PUBLIC_1_16_1_PRECOMMIT_GATE=PASS')
+
+      - name: Commit guarded promotion to release branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release/launcher-1.16.1-public'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- 'AotR 8P WotR Mod.exe' 'manifest.json' 'repair-manifest.json'
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Release launcher 1.16.1 public (Defender-clean unsigned)'
+            git push origin HEAD:release/launcher-1.16.1-public
+          } else {
+            throw 'Promotion produced no public-file changes'
+          }
+
+      - name: Verify promoted identity in pull request
+        if: github.event_name == 'pull_request'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = 'BFBD459F798E88C4E5EDA803E071AACB24CF719AA0B6A321EBAD9CAB81B6223B'
+          $manifest = Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
+          $repair = Get-Content -LiteralPath '.\repair-manifest.json' -Raw | ConvertFrom-Json
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath '.\AotR 8P WotR Mod.exe').Hash
+          if ([string]$manifest.launcher_version -ne '1.16.1') { throw "PR manifest is not 1.16.1: $($manifest.launcher_version)" }
+          if ([string]$manifest.launcher_sha256 -ne $expected) { throw 'PR manifest launcher hash mismatch' }
+          if ([string]$repair.generated_for_launcher -ne '1.16.1') { throw 'PR repair-manifest version mismatch' }
+          if ($actual -ne $expected) { throw "PR public EXE mismatch: $actual" }
+          Write-Host 'PUBLIC_1_16_1_PR_IDENTITY=PASS'
+
+      - name: Classification
+        shell: powershell
+        run: |
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            Write-Host 'PUBLIC_RELEASE_REVIEW_PASS'
+          } else {
+            Write-Host 'UNSIGNED_PUBLIC_PROMOTION_PASS'
+          }
