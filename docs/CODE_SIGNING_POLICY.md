@@ -8,13 +8,27 @@ It does **not** grant ownership or an Open Source license over AotR, BFME, EA, o
 
 ## Current release boundary
 
-The public launcher remains frozen until a guarded promotion explicitly changes it.
+Public launcher promotion is explicit and guarded. A release may be signed or unsigned, but the exact public binary identity must be frozen in `manifest.json` and pass the applicable release checks before promotion.
 
-Unsigned development and release-candidate binaries may be produced for CI, static analysis, hosted Defender scanning, and isolated automated lifecycle testing. They are **not** normal Windows field candidates.
+Unsigned development and release-candidate binaries may be produced for CI, static analysis, hosted Defender scanning, and isolated automated lifecycle testing.
 
-## Field-candidate rule
+## Public unsigned-release rule
 
-A launcher binary may be labeled `FIELD_CANDIDATE` only after the exact post-sign file passes all of the following:
+An unsigned launcher may be promoted as a normal public release when all of the following are true:
+
+1. the repository owner or authorized release approver explicitly approves the unsigned release;
+2. ProductVersion matches the intended public version;
+3. the exact SHA256 of the promoted EXE is frozen in `manifest.json`;
+4. hosted Microsoft Defender scanning of the exact candidate reports no threats;
+5. the public release-consistency / Guardian checks pass;
+6. no known Defender quarantine or malware-detection regression is present for the candidate;
+7. users are not instructed to disable Defender, Smart App Control, add broad exclusions, or weaken Windows security controls.
+
+A normal Windows SmartScreen / unknown-publisher reputation warning on an unsigned binary is acceptable under this rule when the file remains Defender-clean and Windows still offers the normal user-controlled execution path (for example, `More info` / `Run anyway`).
+
+## Trusted field-candidate rule
+
+`FIELD_CANDIDATE` remains the stricter designation for a trusted, signed Windows candidate. A launcher binary may be labeled `FIELD_CANDIDATE` only after the exact post-sign file passes all of the following:
 
 1. `Get-AuthenticodeSignature` returns `Valid`.
 2. A signer certificate is present.
@@ -42,7 +56,7 @@ The workflow consumes an already-created signed GitHub Actions artifact and veri
 
 ## Smart App Control / Defender policy
 
-A Defender-clean result does not by itself qualify an unsigned binary for field execution. Smart App Control can independently block unknown unsigned code.
+A Defender-clean result is mandatory for an approved unsigned public launcher, but does not make that binary a trusted signed `FIELD_CANDIDATE`. Smart App Control / SmartScreen reputation can independently warn about unknown unsigned code.
 
 Do not instruct maintainers or users to disable Smart App Control or Defender, add broad exclusions, or use security-policy bypasses as the normal release solution.
 
@@ -50,30 +64,27 @@ Do not instruct maintainers or users to disable Smart App Control or Defender, a
 
 Parent tracking issue: #52.
 
-The free SignPath Foundation route additionally requires an OSS-compatible signed-binary boundary. That ownership/license cleanup is tracked separately in #88. Until that work is complete, this policy and verifier are provider-neutral and can also be used with a traditional publicly trusted RSA code-signing certificate or another eligible trusted signing service.
+The free SignPath Foundation route additionally requires an OSS-compatible signed-binary boundary. That ownership/license cleanup is tracked separately in #88. Signing remains a desirable future hardening/reputation improvement, but it is not a mandatory blocker for an explicitly approved Defender-clean public release under the unsigned-release rule above.
 
 ## Roles
 
 - Build/release integration: Project Guardian / repository maintainers.
+- Public unsigned-release approval: repository owner/authorized release approver.
 - Signing approval: repository owner/authorized release approver.
 - Source review: normal protected-branch pull-request and Guardian checks.
 
-No signing request should bypass the repository's protected review/release process.
+No release request should bypass the repository's protected review/release process.
 
-## Required provenance for each signed candidate
+## Required provenance for each public candidate
 
 Record at minimum:
 
 - source commit SHA;
-- unsigned pre-sign SHA256;
-- signing provider/profile identifier where safe to publish;
-- signer subject and issuer;
-- signer certificate thumbprint/serial where appropriate;
-- timestamp certificate presence;
-- post-sign SHA256;
+- exact public/candidate SHA256;
 - ProductVersion;
-- signing verification workflow run ID;
 - Defender/security scan result;
-- field-test environment/result.
+- release-consistency / Guardian result;
+- whether the binary is signed or unsigned;
+- release approver/decision context where appropriate.
 
-The post-sign hash, not the unsigned pre-sign hash, is the binary identity used for field acceptance and eventual release promotion.
+For signed candidates, additionally record the signing provider/profile identifier where safe to publish, signer subject and issuer, certificate thumbprint/serial where appropriate, timestamp certificate presence, signing verification workflow run ID, and exact post-sign SHA256.
