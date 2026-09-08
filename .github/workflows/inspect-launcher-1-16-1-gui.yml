@@ -1,0 +1,36 @@
+name: Inspect launcher 1.16.1 GUI anchors
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'launcher-source/v24/**'
+      - '.github/workflows/inspect-launcher-1-16-1-gui.yml'
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen public 1.1.6 donor
+        shell: powershell
+        run: |
+          $expected = 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431'
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath 'AotR 8P WotR Mod.exe').Hash
+          if ($actual -ne $expected) { throw "Public 1.1.6 EXE hash mismatch: $actual" }
+      - name: Extract embedded GUI
+        shell: powershell
+        run: |
+          $exe = Resolve-Path 'AotR 8P WotR Mod.exe'
+          $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
+          $stream = $asm.GetManifestResourceStream('AotR8P.GuiScript')
+          if (-not $stream) { throw 'AotR8P.GuiScript resource missing' }
+          try {
+            $out = [IO.File]::Create("$env:RUNNER_TEMP\launcher_gui.ps1")
+            try { $stream.CopyTo($out) } finally { $out.Dispose() }
+          } finally { $stream.Dispose() }
+          Write-Host "GUI_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath "$env:RUNNER_TEMP\launcher_gui.ps1").Hash)"
+      - name: Print relevant GUI anchors
+        shell: cmd
+        run: python launcher-source\v24\inspect_gui_anchors.py "%RUNNER_TEMP%\launcher_gui.ps1"
