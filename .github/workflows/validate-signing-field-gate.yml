@@ -40,36 +40,38 @@ jobs:
           }
           Write-Host 'TRUSTED_FIELD_VERIFIER_PS51_PARSE=PASS'
 
-      - name: Require frozen public 1.1.6 identity
+      - name: Verify current public launcher identity is manifest-frozen
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $manifest = Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
-          if ($manifest.launcher_version -ne '1.1.6') {
-              throw "Public manifest moved unexpectedly: $($manifest.launcher_version)"
-          }
+          $version = [string]$manifest.launcher_version
+          $expected = ([string]$manifest.launcher_sha256).ToUpperInvariant()
+          if ([string]::IsNullOrWhiteSpace($version)) { throw 'Public manifest has no launcher_version' }
+          if ([string]::IsNullOrWhiteSpace($expected)) { throw 'Public manifest has no launcher_sha256' }
           $hash = (Get-FileHash -LiteralPath '.\AotR 8P WotR Mod.exe' -Algorithm SHA256).Hash
-          if ($hash -ne 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431') {
-              throw "Frozen public 1.1.6 EXE changed: $hash"
-          }
-          Write-Host 'TRUSTED_FIELD_PUBLIC_1_1_6_BOUNDARY=PASS'
+          if ($hash -ne $expected) { throw "Public EXE / manifest identity mismatch: expected $expected got $hash" }
+          $fvi = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path '.\AotR 8P WotR Mod.exe'))
+          if ($fvi.ProductVersion -ne $version) { throw "Public ProductVersion mismatch: manifest $version EXE $($fvi.ProductVersion)" }
+          Write-Host "PUBLIC_MANIFEST_IDENTITY=PASS :: $version :: $hash"
 
-      - name: Prove unsigned public launcher cannot pass trusted field gate
+      - name: Prove unsigned public launcher cannot pass trusted FIELD_CANDIDATE gate
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
           $caught = $null
           try {
               & '.\launcher-source\signing\VERIFY_TRUSTED_FIELD_CANDIDATE.ps1' `
                   -ExePath '.\AotR 8P WotR Mod.exe' `
-                  -ExpectedSha256 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431' `
-                  -ExpectedProductVersion '1.1.6'
+                  -ExpectedSha256 ([string]$manifest.launcher_sha256) `
+                  -ExpectedProductVersion ([string]$manifest.launcher_version)
           }
           catch {
               $caught = [string]$_.Exception.Message
           }
           if ([string]::IsNullOrWhiteSpace($caught)) {
-              throw 'Negative test failed: frozen unsigned launcher unexpectedly passed the trusted field gate.'
+              throw 'Negative test failed: unsigned public launcher unexpectedly passed the trusted FIELD_CANDIDATE gate.'
           }
           if ($caught -notlike 'TRUSTED_FIELD_CANDIDATE_GATE_FAIL:*Authenticode status is not Valid*') {
               throw "Negative test failed for an unexpected reason: $caught"
@@ -83,6 +85,7 @@ jobs:
           $policy = Get-Content -LiteralPath '.\docs\CODE_SIGNING_POLICY.md' -Raw
           foreach ($needle in @(
               'Code signing policy',
+              'Public unsigned-release rule',
               'FIELD_CANDIDATE',
               'Get-AuthenticodeSignature',
               'signtool verify /pa /v',
