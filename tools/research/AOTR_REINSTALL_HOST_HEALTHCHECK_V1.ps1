@@ -36,10 +36,12 @@ function Report-File([string]$Label,[string]$Path,[string]$ExpectedHash,[Nullabl
     Write-Host ("LENGTH = {0}" -f $f.Length)
     Write-Host ("SHA256 = {0}" -f $h)
     if (-not [string]::IsNullOrWhiteSpace($ExpectedHash)) {
-        Write-Host ("HASH_OK = {0}" -f ($(if($hashOk){'YES'}else{'NO'}))) $(if($hashOk){'-ForegroundColor Green'}else{'-ForegroundColor Red'})
+        if ($hashOk) { Write-Host 'HASH_OK = YES' -ForegroundColor Green }
+        else { Write-Host 'HASH_OK = NO' -ForegroundColor Red }
     }
     if ($null -ne $ExpectedLength) {
-        Write-Host ("LENGTH_OK = {0}" -f ($(if($lengthOk){'YES'}else{'NO'})))
+        if ($lengthOk) { Write-Host 'LENGTH_OK = YES' -ForegroundColor Green }
+        else { Write-Host 'LENGTH_OK = NO' -ForegroundColor Red }
     }
     Write-Host ''
     return [pscustomobject]@{ Exists=$true; HashOk=$hashOk; LengthOk=$lengthOk; Hash=$h; Length=[long]$f.Length }
