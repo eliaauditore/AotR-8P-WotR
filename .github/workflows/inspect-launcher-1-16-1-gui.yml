@@ -19,18 +19,24 @@ jobs:
           $expected = 'E5FD1761FB84E452782AFD970225775CB55096C22628F1B9061344C282861431'
           $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath 'AotR 8P WotR Mod.exe').Hash
           if ($actual -ne $expected) { throw "Public 1.1.6 EXE hash mismatch: $actual" }
-      - name: Extract embedded GUI
+      - name: Extract embedded GUI and engine
         shell: powershell
         run: |
           $exe = Resolve-Path 'AotR 8P WotR Mod.exe'
           $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
-          $stream = $asm.GetManifestResourceStream('AotR8P.GuiScript')
-          if (-not $stream) { throw 'AotR8P.GuiScript resource missing' }
-          try {
-            $out = [IO.File]::Create("$env:RUNNER_TEMP\launcher_gui.ps1")
-            try { $stream.CopyTo($out) } finally { $out.Dispose() }
-          } finally { $stream.Dispose() }
-          Write-Host "GUI_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath "$env:RUNNER_TEMP\launcher_gui.ps1").Hash)"
+          foreach ($item in @(
+            @{ Name='AotR8P.GuiScript'; File='launcher_gui.ps1' },
+            @{ Name='AotR8P.EngineScript'; File='launcher_engine.ps1' }
+          )) {
+            $stream = $asm.GetManifestResourceStream($item.Name)
+            if (-not $stream) { throw "$($item.Name) resource missing" }
+            $target = Join-Path $env:RUNNER_TEMP $item.File
+            try {
+              $out = [IO.File]::Create($target)
+              try { $stream.CopyTo($out) } finally { $out.Dispose() }
+            } finally { $stream.Dispose() }
+            Write-Host "$($item.Name)_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash)"
+          }
       - name: Print relevant GUI anchors
         shell: cmd
         run: python launcher-source\v24\inspect_gui_anchors.py "%RUNNER_TEMP%\launcher_gui.ps1"
