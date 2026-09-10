@@ -46,7 +46,7 @@ function New-A8PConnectionIO {
     param([System.Net.Sockets.TcpClient]$TcpClient)
 
     $stream = $TcpClient.GetStream()
-    $stream.ReadTimeout = 10000
+    $stream.ReadTimeout = 120000
     $stream.WriteTimeout = 10000
 
     $utf8 = New-Object System.Text.UTF8Encoding($false)
