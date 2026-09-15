@@ -29,3 +29,29 @@ jobs:
         run: node --check api/report.js
       - name: Run tests
         run: npm test
+      - name: Production GET reports schema 2
+        working-directory: .
+        run: |
+          node - <<'NODE'
+          const url = 'https://a8p-direct-report.vercel.app/api/report';
+          const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+          let last = '';
+          for (let attempt = 1; attempt <= 12; attempt++) {
+            try {
+              const res = await fetch(url, { headers: { 'user-agent': 'AotR-8P-WotR-CI/1' } });
+              last = await res.text();
+              if (res.ok) {
+                const data = JSON.parse(last);
+                if (data && data.ok === true && data.schema === 2) {
+                  console.log('DIRECT_REPORT_PRODUCTION_SCHEMA2=PASS');
+                  process.exit(0);
+                }
+              }
+            } catch (err) {
+              last = String(err);
+            }
+            console.log(`production schema not ready (attempt ${attempt}/12): ${last.slice(0, 300)}`);
+            await sleep(10000);
+          }
+          throw new Error('Production direct-report endpoint did not report schema 2: ' + last.slice(0, 500));
+          NODE
