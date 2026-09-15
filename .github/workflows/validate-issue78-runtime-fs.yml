@@ -50,6 +50,7 @@ jobs:
           $expectedEngines=@{
             '1.16.1'='E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641'
             '1.16.2'='954D2FD4E23547998D2BC5323BB7026C21384CA4FCA59F7E786E6F0E18088880'
+            '1.16.3'='72967D49C4D35B4A3FAEBAC4F5866D8B910B9A7FC83568D04B9BA81364AC8917'
           }
           $releaseVersion=[string]$manifest.launcher_version
           if(-not $expectedEngines.ContainsKey($releaseVersion)){throw "Issue78 has no approved Engine identity for launcher $releaseVersion"}
