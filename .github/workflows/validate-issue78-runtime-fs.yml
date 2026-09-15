@@ -44,10 +44,17 @@ jobs:
           Export-Resource 'AotR8P.EngineScript' $engine
           Export-Resource 'AotR8P.GuiScript' $gui
 
-          # This exact Engine hash is the real-exFAT-tested 1.1.4 runtime implementation.
+          # Issue78's filesystem implementation is unchanged in 1.16.2, but the Engine
+          # resource hash legitimately changes because #97 modifies only the V7 child binding.
           $engineHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $engine).Hash
-          $expectedEngine='E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641'
-          if($engineHash -ne $expectedEngine){throw "Issue78 engine regression: $engineHash"}
+          $expectedEngines=@{
+            '1.16.1'='E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641'
+            '1.16.2'='954D2FD4E23547998D2BC5323BB7026C21384CA4FCA59F7E786E6F0E18088880'
+          }
+          $releaseVersion=[string]$manifest.launcher_version
+          if(-not $expectedEngines.ContainsKey($releaseVersion)){throw "Issue78 has no approved Engine identity for launcher $releaseVersion"}
+          $expectedEngine=$expectedEngines[$releaseVersion]
+          if($engineHash -ne $expectedEngine){throw "Issue78 engine regression for $releaseVersion: $engineHash"}
 
           foreach($path in @($engine,$gui)){
             $tokens=$null;$errors=$null
