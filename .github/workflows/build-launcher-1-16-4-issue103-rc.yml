@@ -110,14 +110,6 @@ jobs:
           $ast = [System.Management.Automation.Language.Parser]::ParseFile($guiPath,[ref]$tokens,[ref]$errors)
           if (@($errors).Count -gt 0) { throw 'GUI parse failed before function extraction' }
 
-          function Import-GuiFunction([string]$Name) {
-            $fn = @($ast.FindAll({
-              param($node)
-              $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $Name
-            }, $true))
-            if ($fn.Count -ne 1) { throw "Expected one GUI function $Name, got $($fn.Count)" }
-            Invoke-Expression $fn[0].Extent.Text
-          }
           function Get-SanitizedText([string]$Text) { return [string]$Text }
           function Limit-SupportText([string]$Text,[int]$MaxLength = 3000) {
             $value = [string]$Text
@@ -126,9 +118,14 @@ jobs:
           }
           function Write-RepairLog([string]$Text) { Write-Host "TEST_LOG: $Text" }
 
-          Import-GuiFunction 'Get-EngineFailureDetailFromLog'
-          Import-GuiFunction 'Get-StructuredEngineDiagnosticFromLog'
-          Import-GuiFunction 'Get-LaunchFailureInfo'
+          foreach ($name in @('Get-EngineFailureDetailFromLog','Get-StructuredEngineDiagnosticFromLog','Get-LaunchFailureInfo')) {
+            $fn = @($ast.FindAll({
+              param($node)
+              $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+            }, $true))
+            if ($fn.Count -ne 1) { throw "Expected one GUI function $name, got $($fn.Count)" }
+            Invoke-Expression $fn[0].Extent.Text
+          }
 
           $human = 'game.dat exited during initialization.'
           $humanB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($human))
