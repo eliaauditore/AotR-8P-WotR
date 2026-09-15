@@ -97,6 +97,45 @@ jobs:
           Write-Host "PRODUCT_VERSION=$($fvi.ProductVersion)"
           Write-Host "FILE_VERSION=$($fvi.FileVersion)"
 
+      - name: Issue97 diagnostic - dump V7 invocation path
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tmp = Join-Path $env:RUNNER_TEMP 'verify-public-1.16.1'
+          $enginePath = Join-Path $tmp 'engine.ps1'
+          $finalPath = Join-Path $tmp 'final_stable_v7.ps1'
+          if (-not (Test-Path -LiteralPath $enginePath)) { throw 'Extracted engine missing' }
+          if (-not (Test-Path -LiteralPath $finalPath)) { throw 'Extracted FINAL_STABLE_V7 missing' }
+
+          $engine = Get-Content -LiteralPath $enginePath
+          $start = -1
+          for ($i = 0; $i -lt $engine.Count; $i++) {
+            if ($engine[$i] -match '^function Install-FinalStableV7') { $start = $i; break }
+          }
+          if ($start -lt 0) { throw 'Install-FinalStableV7 not found' }
+          $depth = 0; $seenBrace = $false; $end = $start
+          for ($i = $start; $i -lt $engine.Count; $i++) {
+            $line = $engine[$i]
+            $opens = ([regex]::Matches($line, '\\{')).Count
+            $closes = ([regex]::Matches($line, '\\}')).Count
+            if ($opens -gt 0) { $seenBrace = $true }
+            $depth += $opens - $closes
+            $end = $i
+            if ($seenBrace -and $i -gt $start -and $depth -le 0) { break }
+          }
+          Write-Host '=== ISSUE97_ENGINE_INSTALL_FINAL_STABLE_V7_BEGIN ==='
+          for ($i = $start; $i -le $end; $i++) { Write-Host ('{0}: {1}' -f ($i+1), $engine[$i]) }
+          Write-Host '=== ISSUE97_ENGINE_INSTALL_FINAL_STABLE_V7_END ==='
+
+          $final = Get-Content -LiteralPath $finalPath
+          Write-Host '=== ISSUE97_FINAL_V7_RELEVANT_LINES_BEGIN ==='
+          for ($i = 0; $i -lt $final.Count; $i++) {
+            if ($final[$i] -match '^(param|\s*\[Parameter|\s*\[string\]\$GamePath|\s*\[int\]\$TargetPid|\s*\[single\]\$Zoom|\s*\[single\]\$Drag|\s*\[byte\[\]\]\$V7Shellcode)|throw |WriteProcessMemory|VirtualAlloc|OpenProcess|game\.dat|TargetPid|ShellcodeTemplate') {
+              Write-Host ('{0}: {1}' -f ($i+1), $final[$i])
+            }
+          }
+          Write-Host '=== ISSUE97_FINAL_V7_RELEVANT_LINES_END ==='
+
       - name: Defender scan of exact promoted public EXE
         shell: powershell
         run: |
