@@ -18,7 +18,12 @@
   ],
   "properties": {
     "schema": {
-      "const": 1
+      "type": "integer",
+      "enum": [
+        1,
+        2
+      ],
+      "description": "Schema 1 is the legacy support bundle. Schema 2 adds privacy-safe structured process early-exit diagnostics."
     },
     "launcher_version": {
       "type": "string",
@@ -225,6 +230,52 @@
         "string",
         "null"
       ]
+    },
+    "process_exit_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Process exit code when available. Either unavailable, signed decimal, or 0xXXXXXXXX/signed-decimal.",
+      "pattern": "^(?:unavailable|0x[A-Fa-f0-9]{8}/-?[0-9]+|-?[0-9]+)$"
+    },
+    "observed_ms": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 600000,
+      "description": "Observed lifetime in milliseconds from game.dat discovery until early exit."
+    },
+    "runtime_location": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "LOCALAPPDATA",
+        "NON_LOCALAPPDATA",
+        "UNKNOWN",
+        null
+      ],
+      "description": "Sanitized runtime location class. Never a full local filesystem path."
+    },
+    "runtime_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Fa-f0-9]{64}$",
+      "description": "SHA256 of the actual runtime game.dat when available."
+    },
+    "wer_signal": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 320,
+      "description": "Privacy-safe crash signal limited to provider/event id, exception code and module basename. Full event text and full paths are prohibited."
     }
   }
 }
