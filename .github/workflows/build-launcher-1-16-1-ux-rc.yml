@@ -104,6 +104,36 @@ jobs:
 
           Write-Host "PUBLIC_IDENTITY_PASS :: version=$version :: sha256=$actual"
 
+      - name: Issue100 diagnostic - inspect early game.dat exit path
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $public = (Resolve-Path '.\AotR 8P WotR Mod.exe').Path
+          $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($public))
+          $stream = $asm.GetManifestResourceStream('AotR8P.EngineScript')
+          if (-not $stream) { throw 'AotR8P.EngineScript missing' }
+          $enginePath = Join-Path $env:RUNNER_TEMP 'issue100-engine.ps1'
+          try {
+            $out = [IO.File]::Create($enginePath)
+            try { $stream.CopyTo($out) } finally { $out.Dispose() }
+          } finally { $stream.Dispose() }
+
+          $lines = Get-Content -LiteralPath $enginePath
+          Write-Host '=== ISSUE100_ENGINE_620_690_BEGIN ==='
+          foreach ($n in 620..690) {
+            if ($n -le $lines.Count) { Write-Host ('{0}: {1}' -f $n, $lines[$n-1]) }
+          }
+          Write-Host '=== ISSUE100_ENGINE_620_690_END ==='
+
+          Write-Host '=== ISSUE100_PROCESS_RELATED_LINES_BEGIN ==='
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            if ($line -match 'Start-Process|HasExited|ExitCode|WaitForExit|Get-Process|ParentProcessId|GamePid|game\.dat wurde während der Initialisierung beendet|AOTR8P_ENGINE_EXIT') {
+              Write-Host ('{0}: {1}' -f ($i+1), $line)
+            }
+          }
+          Write-Host '=== ISSUE100_PROCESS_RELATED_LINES_END ==='
+
       - name: Defender scan exact current public EXE
         shell: powershell
         run: |
