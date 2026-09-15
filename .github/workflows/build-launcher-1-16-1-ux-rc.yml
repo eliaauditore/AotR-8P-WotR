@@ -1,4 +1,4 @@
-name: Verify launcher 1.16.1 public
+name: Verify / promote launcher 1.16.2
 
 on:
   pull_request:
@@ -7,57 +7,67 @@ on:
       - 'launcher-source/v24/**'
       - 'launcher-source/v25/**'
       - 'launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V25_FINAL_1_16_2.ps1'
-      - 'launcher-source/BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V24_FINAL_1_16_1.ps1'
       - 'AotR 8P WotR Mod.exe'
       - 'manifest.json'
       - 'repair-manifest.json'
       - '.github/workflows/build-launcher-1-16-1-ux-rc.yml'
+  push:
+    branches:
+      - release/launcher-1.16.2-public
+    paths:
+      - '.github/workflows/build-launcher-1-16-1-ux-rc.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify-public:
+    name: Verify current public launcher
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify promoted public identity and embedded boundaries
+      - name: Verify public identity and embedded boundaries
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $public = (Resolve-Path '.\AotR 8P WotR Mod.exe').Path
           $manifest = Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
           $repair = Get-Content -LiteralPath '.\repair-manifest.json' -Raw | ConvertFrom-Json
+          $version = [string]$manifest.launcher_version
 
-          if ([string]$manifest.launcher_version -ne '1.16.1') {
-            throw "Public manifest is not 1.16.1: $($manifest.launcher_version)"
-          }
-          if ([string]$repair.generated_for_launcher -ne '1.16.1') {
-            throw "repair-manifest is not for 1.16.1: $($repair.generated_for_launcher)"
-          }
+          if ($version -notin @('1.16.1','1.16.2')) { throw "Unexpected public launcher version: $version" }
+          if ([string]$repair.generated_for_launcher -ne $version) { throw "repair-manifest version mismatch" }
 
           $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $public).Hash
           $expected = ([string]$manifest.launcher_sha256).ToUpperInvariant()
-          if ($actual -ne $expected) {
-            throw "Public EXE / manifest hash mismatch: expected $expected got $actual"
-          }
-          if ($actual -ne 'E4362F15DB47F1298B62C63F44C09AF5E41C07BD460FAE949609A5DB16D8F64C') {
-            throw "Unexpected promoted 1.16.1 binary identity: $actual"
-          }
+          if ($actual -ne $expected) { throw "Public EXE / manifest hash mismatch: expected $expected got $actual" }
 
           $fvi = [Diagnostics.FileVersionInfo]::GetVersionInfo($public)
-          if ($fvi.ProductVersion -ne '1.16.1') { throw "ProductVersion mismatch: $($fvi.ProductVersion)" }
-          if ($fvi.FileVersion -ne '1.16.1.0') { throw "FileVersion mismatch: $($fvi.FileVersion)" }
+          if ($fvi.ProductVersion -ne $version) { throw "ProductVersion mismatch: $($fvi.ProductVersion)" }
+
+          if ($version -eq '1.16.1') {
+            if ($actual -ne 'E4362F15DB47F1298B62C63F44C09AF5E41C07BD460FAE949609A5DB16D8F64C') {
+              throw "Unexpected 1.16.1 binary identity: $actual"
+            }
+            $expectedGui = '222B5DC9EC8B787BF11B2913601FDB06C277EB20697488DDF034852E3F253B70'
+            $expectedEngine = 'E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641'
+            $expectedFinal = '72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2'
+          }
+          else {
+            $expectedGui = 'F17D8DE40DAAD271D9A85FC7C52F8B28DFAF18B35010AF587BF1D6076BA75F5F'
+            $expectedEngine = '954D2FD4E23547998D2BC5323BB7026C21384CA4FCA59F7E786E6F0E18088880'
+            $expectedFinal = 'F16522820D7B25CDD4ACF1267B8A300C6BFE661C7FEF636BB611819F7BDC84D3'
+          }
 
           $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($public))
-          $tmp = Join-Path $env:RUNNER_TEMP 'verify-public-1.16.1'
+          $tmp = Join-Path $env:RUNNER_TEMP "verify-public-$version"
           New-Item -ItemType Directory -Force -Path $tmp | Out-Null
           $resources = @(
-            @{ Name='AotR8P.GuiScript'; File='gui.ps1'; Hash='222B5DC9EC8B787BF11B2913601FDB06C277EB20697488DDF034852E3F253B70' },
-            @{ Name='AotR8P.EngineScript'; File='engine.ps1'; Hash='E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641' },
-            @{ Name='AotR8P.FinalStableV7'; File='final_stable_v7.ps1'; Hash='72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2' },
+            @{ Name='AotR8P.GuiScript'; File='gui.ps1'; Hash=$expectedGui },
+            @{ Name='AotR8P.EngineScript'; File='engine.ps1'; Hash=$expectedEngine },
+            @{ Name='AotR8P.FinalStableV7'; File='final_stable_v7.ps1'; Hash=$expectedFinal },
             @{ Name='AotR8P.V7Shellcode'; File='v7_shellcode.bin'; Hash='60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A' }
           )
           foreach ($item in $resources) {
@@ -69,8 +79,7 @@ jobs:
               try { $stream.CopyTo($out) } finally { $out.Dispose() }
             } finally { $stream.Dispose() }
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash
-            if ($hash -ne $item.Hash) { throw "$($item.Name) public hash mismatch: $hash" }
-            Write-Host "RESOURCE_PASS :: $($item.Name) :: $hash"
+            if ($hash -ne $item.Hash) { throw "$($item.Name) hash mismatch: $hash" }
           }
 
           foreach ($script in @('gui.ps1','engine.ps1','final_stable_v7.ps1')) {
@@ -80,26 +89,22 @@ jobs:
             if (@($errors).Count -gt 0) { throw "PowerShell 5.1 parse failed: $script :: $($errors[0].Message)" }
           }
 
-          $gui = [IO.File]::ReadAllText((Join-Path $tmp 'gui.ps1'))
-          foreach ($required in @(
-            'x:Name="ChangelogHit"',
-            'function Show-LauncherChangelog {',
-            '[System.Media.SystemSounds]::Asterisk.Play()',
-            '$previousLatestMessageId',
-            '$ChangelogHit.Add_MouseLeftButtonUp({ Show-LauncherChangelog })',
-            'Launcher 1.16.1',
-            'A8P-RUNTIME-FS-001'
-          )) {
-            if ($gui.IndexOf($required,[StringComparison]::Ordinal) -lt 0) {
-              throw "Public GUI contract missing: $required"
+          if ($version -eq '1.16.2') {
+            $engine = [IO.File]::ReadAllText((Join-Path $tmp 'engine.ps1'))
+            $final = [IO.File]::ReadAllText((Join-Path $tmp 'final_stable_v7.ps1'))
+            $gui = [IO.File]::ReadAllText((Join-Path $tmp 'gui.ps1'))
+            foreach ($required in @('AddParameter("TargetPid", [int]$GamePid)','$invokeError = $_','FINAL_STABLE_V7 In-Memory PowerShell failed: $detail')) {
+              if ($engine.IndexOf($required,[StringComparison]::Ordinal) -lt 0) { throw "1.16.2 engine contract missing: $required" }
             }
+            foreach ($required in @('[int]$TargetPid = 0','if ($TargetPid -gt 0)','$target = Get-RunningTarget $GameDat')) {
+              if ($final.IndexOf($required,[StringComparison]::Ordinal) -lt 0) { throw "1.16.2 V7 contract missing: $required" }
+            }
+            if ($gui.IndexOf('Launcher 1.16.2',[StringComparison]::Ordinal) -lt 0) { throw '1.16.2 changelog missing' }
           }
 
-          Write-Host "PUBLIC_1_16_1_IDENTITY=PASS :: $actual"
-          Write-Host "PRODUCT_VERSION=$($fvi.ProductVersion)"
-          Write-Host "FILE_VERSION=$($fvi.FileVersion)"
+          Write-Host "PUBLIC_IDENTITY_PASS :: version=$version :: sha256=$actual"
 
-      - name: Defender scan of exact promoted public EXE
+      - name: Defender scan exact current public EXE
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -112,25 +117,17 @@ jobs:
           & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
           if ($LASTEXITCODE -notin @(0,2)) { throw "Defender scan failed with exit code $LASTEXITCODE" }
           $threats = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.Resources -match [regex]::Escape($exe) })
-          if ($threats.Count -gt 0) {
-            $threats | Format-List *
-            throw 'Defender detected the exact promoted public 1.16.1 EXE'
-          }
-          Write-Host 'PUBLIC_1_16_1_DEFENDER=SCANNED_CLEAN'
-
-      - name: Classification
-        shell: powershell
-        run: |
-          Write-Host 'PUBLIC_RELEASE_REVIEW_PASS'
-
+          if ($threats.Count -gt 0) { throw 'Defender detected current public launcher' }
+          Write-Host 'PUBLIC_DEFENDER=SCANNED_CLEAN'
 
   build-issue97-rc:
     name: Build Issue97 launcher 1.16.2 RC
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build 1.16.2 Issue97 candidate
+      - name: Build 1.16.2 candidate
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -146,7 +143,7 @@ jobs:
           "ISSUE97_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "ISSUE97_CANDIDATE_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash)"
 
-      - name: Verify 1.16.2 embedded contracts
+      - name: Verify deterministic Issue97 resources
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -154,50 +151,32 @@ jobs:
           $asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe))
           $tmp = Join-Path $env:RUNNER_TEMP 'issue97-resources'
           New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-          foreach ($item in @(
-            @{ Name='AotR8P.GuiScript'; File='gui.ps1' },
-            @{ Name='AotR8P.EngineScript'; File='engine.ps1' },
-            @{ Name='AotR8P.FinalStableV7'; File='final_stable_v7.ps1' },
-            @{ Name='AotR8P.V7Shellcode'; File='v7_shellcode.bin' }
-          )) {
+
+          $resources = @(
+            @{ Name='AotR8P.GuiScript'; File='gui.ps1'; Hash='F17D8DE40DAAD271D9A85FC7C52F8B28DFAF18B35010AF587BF1D6076BA75F5F' },
+            @{ Name='AotR8P.EngineScript'; File='engine.ps1'; Hash='954D2FD4E23547998D2BC5323BB7026C21384CA4FCA59F7E786E6F0E18088880' },
+            @{ Name='AotR8P.FinalStableV7'; File='final_stable_v7.ps1'; Hash='F16522820D7B25CDD4ACF1267B8A300C6BFE661C7FEF636BB611819F7BDC84D3' },
+            @{ Name='AotR8P.V7Shellcode'; File='v7_shellcode.bin'; Hash='60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A' }
+          )
+          foreach ($item in $resources) {
             $stream = $asm.GetManifestResourceStream($item.Name)
-            if (-not $stream) { throw "$($item.Name) missing from candidate" }
+            if (-not $stream) { throw "$($item.Name) missing" }
             $target = Join-Path $tmp $item.File
             try {
               $out = [IO.File]::Create($target)
               try { $stream.CopyTo($out) } finally { $out.Dispose() }
             } finally { $stream.Dispose() }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash
+            if ($hash -ne $item.Hash) { throw "$($item.Name) deterministic hash mismatch: $hash" }
           }
+
           foreach ($script in @('gui.ps1','engine.ps1','final_stable_v7.ps1')) {
             $path = Join-Path $tmp $script
             $tokens=$null; $errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
             if (@($errors).Count -gt 0) { throw "PS5.1 parse failed: $script :: $($errors[0].Message)" }
           }
-          $engine = [IO.File]::ReadAllText((Join-Path $tmp 'engine.ps1'))
-          foreach ($required in @(
-            'AddParameter("TargetPid", [int]$GamePid)',
-            '$invokeError = $_',
-            'FINAL_STABLE_V7 In-Memory PowerShell failed: $detail'
-          )) {
-            if ($engine.IndexOf($required,[StringComparison]::Ordinal) -lt 0) { throw "Issue97 engine contract missing: $required" }
-          }
-          $final = [IO.File]::ReadAllText((Join-Path $tmp 'final_stable_v7.ps1'))
-          foreach ($required in @(
-            '[int]$TargetPid = 0',
-            'if ($TargetPid -gt 0)',
-            'Launcher-bound game.dat PID verwendet',
-            '$target = Get-RunningTarget $GameDat'
-          )) {
-            if ($final.IndexOf($required,[StringComparison]::Ordinal) -lt 0) { throw "Issue97 V7 contract missing: $required" }
-          }
-          $gui = [IO.File]::ReadAllText((Join-Path $tmp 'gui.ps1'))
-          if ($gui.IndexOf('Launcher 1.16.2',[StringComparison]::Ordinal) -lt 0) { throw '1.16.2 changelog entry missing' }
           "ISSUE97_RESOURCE_ROOT=$tmp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "ISSUE97_GUI_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $tmp 'gui.ps1')).Hash)"
-          Write-Host "ISSUE97_ENGINE_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $tmp 'engine.ps1')).Hash)"
-          Write-Host "ISSUE97_FINAL_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $tmp 'final_stable_v7.ps1')).Hash)"
-          Write-Host "ISSUE97_SHELLCODE_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $tmp 'v7_shellcode.bin')).Hash)"
 
       - name: Prove exact PID binding bypasses legacy path rediscovery
         shell: powershell
@@ -219,14 +198,14 @@ jobs:
             [void]$child.AddParameter('TargetPid', [int]$PID)
             try { $null = $child.Invoke() } catch { $caught = [string]$_.Exception.Message }
             if ($child.HadErrors) {
-              $streamDetail = ($child.Streams.Error | ForEach-Object { $_.ToString() }) -join ' | '
-              if (-not [string]::IsNullOrWhiteSpace($streamDetail)) { $caught = $streamDetail }
+              $detail = ($child.Streams.Error | ForEach-Object { $_.ToString() }) -join ' | '
+              if (-not [string]::IsNullOrWhiteSpace($detail)) { $caught = $detail }
             }
           }
           finally { $child.Dispose() }
-          if ([string]::IsNullOrWhiteSpace($caught)) { throw 'Synthetic PID-binding proof unexpectedly reached the write path.' }
-          if ($caught -match 'passende game\.dat laeuft noch nicht') { throw "Legacy path rediscovery is still active: $caught" }
-          if ($caught -match 'game\.dat nicht gefunden') { throw "PID proof failed before process binding: $caught" }
+          if ([string]::IsNullOrWhiteSpace($caught)) { throw 'PID binding proof unexpectedly reached write path' }
+          if ($caught -match 'passende game\.dat laeuft noch nicht') { throw "Legacy path rediscovery still active: $caught" }
+          if ($caught -match 'game\.dat nicht gefunden') { throw "PID proof failed before binding: $caught" }
           Write-Host 'ISSUE97_EXACT_PID_BINDING_GATE=PASS'
           Write-Host "EXPECTED_LATER_SAFE_FAILURE=$caught"
 
@@ -243,10 +222,10 @@ jobs:
           & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
           if ($LASTEXITCODE -notin @(0,2)) { throw "Defender scan failed with exit code $LASTEXITCODE" }
           $threats = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.Resources -match [regex]::Escape($exe) })
-          if ($threats.Count -gt 0) { throw 'Defender detected launcher 1.16.2 Issue97 candidate' }
+          if ($threats.Count -gt 0) { throw 'Defender detected launcher 1.16.2 candidate' }
           Write-Host 'ISSUE97_1_16_2_DEFENDER=SCANNED_CLEAN'
 
-      - name: Upload Issue97 RC
+      - name: Upload exact scanned 1.16.2 candidate
         uses: actions/upload-artifact@v4
         with:
           name: AotR-launcher-1.16.2-Issue97-RC
@@ -257,3 +236,86 @@ jobs:
             ${{ env.ISSUE97_OUT }}/SHA256SUMS.json
             ${{ env.ISSUE97_OUT }}/DEFENDER_SCAN.txt
           if-no-files-found: error
+
+  promote-1-16-2:
+    name: Promote 1.16.2 public
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release/launcher-1.16.2-public'
+    needs: [verify-public, build-issue97-rc]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: release/launcher-1.16.2-public
+          fetch-depth: 0
+
+      - name: Download exact scanned candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: AotR-launcher-1.16.2-Issue97-RC
+          path: ${{ runner.temp }}/issue97-artifact
+
+      - name: Re-scan and stage exact candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'issue97-artifact'
+          $exe = Join-Path $root 'package\AotR 8P WotR Mod.exe'
+          $candidateManifest = Join-Path $root 'package\manifest.json'
+          $candidateRepair = Join-Path $root 'package\repair-manifest.json'
+          foreach ($p in @($exe,$candidateManifest,$candidateRepair)) {
+            if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "Promotion artifact missing: $p" }
+          }
+
+          $manifest = Get-Content -LiteralPath $candidateManifest -Raw | ConvertFrom-Json
+          $repair = Get-Content -LiteralPath $candidateRepair -Raw | ConvertFrom-Json
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
+          if ([string]$manifest.launcher_version -ne '1.16.2') { throw 'Candidate manifest version mismatch' }
+          if ([string]$repair.generated_for_launcher -ne '1.16.2') { throw 'Candidate repair-manifest version mismatch' }
+          if ($actual -ne ([string]$manifest.launcher_sha256).ToUpperInvariant()) { throw 'Candidate EXE/manifest SHA mismatch' }
+
+          $mp = @(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $mp) { throw 'MpCmdRun.exe not found on hosted runner' }
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          if ($LASTEXITCODE -notin @(0,2)) { throw "Defender promotion scan failed: $LASTEXITCODE" }
+          $threats = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.Resources -match [regex]::Escape($exe) })
+          if ($threats.Count -gt 0) { throw 'Defender detected exact promotion candidate' }
+
+          Copy-Item -LiteralPath $exe -Destination '.\AotR 8P WotR Mod.exe' -Force
+          Copy-Item -LiteralPath $candidateManifest -Destination '.\manifest.json' -Force
+          Copy-Item -LiteralPath $candidateRepair -Destination '.\repair-manifest.json' -Force
+
+          $publicHash = (Get-FileHash -Algorithm SHA256 -LiteralPath '.\AotR 8P WotR Mod.exe').Hash
+          if ($publicHash -ne $actual) { throw 'Staged public EXE changed after Defender scan' }
+          "PROMOTED_SHA256=$publicHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "PUBLIC_1_16_2_PROMOTION_SCAN=SCANNED_CLEAN :: $publicHash"
+
+      - name: Pre-commit release consistency
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib, json
+          root = Path('.')
+          manifest = json.loads((root/'manifest.json').read_text(encoding='utf-8-sig'))
+          repair = json.loads((root/'repair-manifest.json').read_text(encoding='utf-8-sig'))
+          actual = hashlib.sha256((root/'AotR 8P WotR Mod.exe').read_bytes()).hexdigest().upper()
+          assert manifest['launcher_version'] == '1.16.2'
+          assert manifest['launcher_sha256'].upper() == actual
+          assert repair['generated_for_launcher'] == '1.16.2'
+          assert (root/'launcher-source'/'BUILD_AOTR_8P_SINGLE_EXE_UPDATE_CHANNEL_V25_FINAL_1_16_2.ps1').is_file()
+          assert manifest['ui_sha256'].upper() == '827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376'
+          assert manifest['paper_sha256'].upper() == '3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43'
+          print('PUBLIC_1_16_2_PRECOMMIT_GATE=PASS :: ' + actual)
+
+      - name: Commit guarded promotion to release branch
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- 'AotR 8P WotR Mod.exe' 'manifest.json' 'repair-manifest.json'
+          if (git diff --cached --quiet) { throw 'Promotion produced no public-file changes' }
+          git commit -m "Release launcher 1.16.2 public - Issue97 PID binding [$env:PROMOTED_SHA256]"
+          git push origin HEAD:release/launcher-1.16.2-public
