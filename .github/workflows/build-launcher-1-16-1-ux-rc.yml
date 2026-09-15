@@ -122,6 +122,7 @@ jobs:
 
   build-issue97-rc:
     name: Build Issue97 launcher 1.16.2 RC
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
