@@ -52,10 +52,55 @@ function validErrorCode(v) {
   return /^A8P-[A-Z0-9-]{3,64}$/.test(str(v, 80));
 }
 
+function diagnosticSchema(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 2 ? 2 : 1;
+}
+
+function sanitizeExitCode(v) {
+  const value = str(v, 64).trim();
+  if (!value) return null;
+  if (/^unavailable$/i.test(value)) return 'unavailable';
+  if (/^0x[0-9A-Fa-f]{8}/-?\d+$/.test(value)) {
+    const [hex, signed] = value.split('/');
+    return hex.toUpperCase() + '/' + signed;
+  }
+  if (/^-?\d+$/.test(value)) return value;
+  return null;
+}
+
+function sanitizeObservedMs(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 0 || n > 600000) return null;
+  return n;
+}
+
+function sanitizeRuntimeLocation(v) {
+  const value = str(v, 32).trim().toUpperCase();
+  return ['LOCALAPPDATA', 'NON_LOCALAPPDATA', 'UNKNOWN'].includes(value) ? value : null;
+}
+
+function sanitizeSha256(v) {
+  const value = str(v, 64);
+  return /^[A-Fa-f0-9]{64}$/.test(value) ? value.toUpperCase() : null;
+}
+
+function sanitizeWerSignal(v) {
+  let value = str(v, 320).replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!value || /^none$/i.test(value)) return null;
+
+  // Defense in depth: the launcher only sends provider/id/exception/module basename,
+  // but redact drive/UNC-looking paths if a future producer regresses.
+  value = value.replace(/\b[A-Za-z]:\\[^;|\s]*/g, '[redacted-path]');
+  value = value.replace(/\\\\[^\\\s;|]+\\[^;|\s]*/g, '[redacted-path]');
+  return value.slice(0, 320);
+}
+
 function sanitizeBundle(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_bundle');
   const bundle = {
-    schema: Number(input.schema) || 1,
+    schema: diagnosticSchema(input.schema),
     launcher_version: str(input.launcher_version, 64),
     error_code: str(input.error_code, 80),
     fingerprint: str(input.fingerprint, 32),
@@ -78,6 +123,11 @@ function sanitizeBundle(input) {
     })) : [],
     last_retry: str(input.last_retry, 80) || null,
     last_error: str(input.last_error, MAX_ERROR_TEXT),
+    process_exit_code: sanitizeExitCode(input.process_exit_code),
+    observed_ms: sanitizeObservedMs(input.observed_ms),
+    runtime_location: sanitizeRuntimeLocation(input.runtime_location),
+    runtime_sha256: sanitizeSha256(input.runtime_sha256),
+    wer_signal: sanitizeWerSignal(input.wer_signal),
     log_files: Array.isArray(input.log_files) ? input.log_files.slice(0, 16).map(x => str(x, 100)) : [],
     notes: 'Submitted through the accountless AotR 8P WotR direct-report endpoint. No GitHub account is required.'
   };
@@ -93,11 +143,34 @@ function issueBody(bundle, exactError) {
   const hashes = bundle.files.length
     ? bundle.files.map(f => `${f.path || f.role}: expected=${f.expected_sha256 || 'n/a'} actual=${f.actual_sha256 || (f.exists ? 'unknown' : 'missing')}`).join('\n')
     : 'none recorded';
-  return `<!-- a8p-direct-report -->\n### Launcher version\n\n${bundle.launcher_version || 'unknown'}\n\n### AotR version\n\n${bundle.aotr_version || 'unknown'}\n\n### Windows version\n\n${bundle.windows || 'unknown'}\n\n### Language\n\n${bundle.language || 'unknown'}\n\n### A8P Error Code\n\n${bundle.error_code}\n\n### Support Fingerprint\n\n${bundle.fingerprint}\n\n### Exact error\n\n${exactError || bundle.last_error || 'unknown'}\n\n### Repair plan\n\n${bundle.repair_plan?.actions?.join('\n') || 'none'}\n\n### Repair attempts\n\n${attempts}\n\n### Expected / actual hashes\n\n${hashes}\n\n### Support bundle\n\n\`\`\`json\n${JSON.stringify(bundle)}\n\`\`\`\n`;
+
+  const hasEarlyExitDiagnostics = [
+    bundle.process_exit_code,
+    bundle.observed_ms,
+    bundle.runtime_location,
+    bundle.runtime_sha256,
+    bundle.wer_signal
+  ].some(v => v !== null && v !== undefined && v !== '');
+
+  const diagnostics = hasEarlyExitDiagnostics
+    ? [
+        `process_exit_code: ${bundle.process_exit_code ?? 'n/a'}`,
+        `observed_ms: ${bundle.observed_ms ?? 'n/a'}`,
+        `runtime_location: ${bundle.runtime_location ?? 'n/a'}`,
+        `runtime_sha256: ${bundle.runtime_sha256 ?? 'n/a'}`,
+        `wer_signal: ${bundle.wer_signal ?? 'n/a'}`
+      ].join('\n')
+    : null;
+
+  const diagnosticSection = diagnostics
+    ? `\n\n### Early-exit diagnostics\n\n${diagnostics}`
+    : '';
+
+  return `<!-- a8p-direct-report -->\n### Launcher version\n\n${bundle.launcher_version || 'unknown'}\n\n### AotR version\n\n${bundle.aotr_version || 'unknown'}\n\n### Windows version\n\n${bundle.windows || 'unknown'}\n\n### Language\n\n${bundle.language || 'unknown'}\n\n### A8P Error Code\n\n${bundle.error_code}\n\n### Support Fingerprint\n\n${bundle.fingerprint}\n\n### Exact error\n\n${exactError || bundle.last_error || 'unknown'}${diagnosticSection}\n\n### Repair plan\n\n${bundle.repair_plan?.actions?.join('\n') || 'none'}\n\n### Repair attempts\n\n${attempts}\n\n### Expected / actual hashes\n\n${hashes}\n\n### Support bundle\n\n\`\`\`json\n${JSON.stringify(bundle)}\n\`\`\`\n`;
 }
 
 module.exports = async function handler(req, res) {
-  if (req.method === 'GET') return json(res, 200, {ok: true, service: 'a8p-direct-report', schema: 1});
+  if (req.method === 'GET') return json(res, 200, {ok: true, service: 'a8p-direct-report', schema: 2});
   if (req.method !== 'POST') return json(res, 405, {ok: false, error: 'method_not_allowed'});
 
   const declared = Number(req.headers['content-length'] || 0);
@@ -150,4 +223,14 @@ module.exports = async function handler(req, res) {
     issue_url: data.html_url,
     fingerprint: bundle.fingerprint
   });
+};
+
+module.exports._test = {
+  sanitizeBundle,
+  issueBody,
+  sanitizeExitCode,
+  sanitizeObservedMs,
+  sanitizeRuntimeLocation,
+  sanitizeSha256,
+  sanitizeWerSignal
 };
