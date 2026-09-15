@@ -149,6 +149,7 @@ jobs:
           }
 
           Emit-Matches 'ISSUE103_GUI_REPORTING' $gui 'support_bundle|last_error|repair_attempts|fingerprint|direct-report|Invoke-RestMethod|exact_error|launcher_current|A8P-ENGINE-001|A8P-GAMEPROC-001|ConvertTo-Json' 8
+          Emit-Matches 'ISSUE103_GUI_ENGINE_RESULT' $gui 'AOTR8P_ENGINE_EXIT|Get-Content|LogFile|launcher_current|Start-Process|WaitForExit|ExitCode|LastErrorDetail|POSITION:|STACK:|Engine' 10
           Emit-Matches 'ISSUE103_ENGINE_ERRORFLOW' $engine 'game\.dat exited during initialization|AOTR8P_ENGINE_EXIT|catch|throw|Write-Host|Write-Error' 5
 
       - name: Defender scan exact current public EXE
