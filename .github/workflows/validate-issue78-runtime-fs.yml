@@ -54,7 +54,7 @@ jobs:
           $releaseVersion=[string]$manifest.launcher_version
           if(-not $expectedEngines.ContainsKey($releaseVersion)){throw "Issue78 has no approved Engine identity for launcher $releaseVersion"}
           $expectedEngine=$expectedEngines[$releaseVersion]
-          if($engineHash -ne $expectedEngine){throw "Issue78 engine regression for $releaseVersion: $engineHash"}
+          if($engineHash -ne $expectedEngine){throw "Issue78 engine regression for ${releaseVersion}: $engineHash"}
 
           foreach($path in @($engine,$gui)){
             $tokens=$null;$errors=$null
