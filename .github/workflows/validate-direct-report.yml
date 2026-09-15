@@ -1,0 +1,31 @@
+name: Validate Direct Report Backend
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'direct-report-backend/**'
+      - '.github/workflows/validate-direct-report.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'direct-report-backend/**'
+      - '.github/workflows/validate-direct-report.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Node schema/privacy tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: direct-report-backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      - name: Syntax check
+        run: node --check api/report.js
+      - name: Run tests
+        run: npm test
