@@ -51,7 +51,7 @@ jobs:
         working-directory: .
         run: |
           node - <<'NODE'
-          const url = 'https://a8p-direct-report-v2-7f2jz8j7v-eliabasile03-6467.vercel.app/api/report';
+          const url = 'https://a8p-direct-report-v2-1famvlx9b-eliabasile03-6467.vercel.app/api/report';
           const res = await fetch(url, {
             headers:{'user-agent':'AotR-Bridge-E2E/1'},
             redirect:'manual',
