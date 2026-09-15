@@ -470,18 +470,18 @@ jobs:
           $humanB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($human))
           $runtimeSha = 'CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC'
           $diagJson = '{"schema":2,"kind":"gameproc_early_exit","process_exit_code":"0xC0000005/-1073741819","observed_ms":2134,"runtime_location":"LOCALAPPDATA","runtime_sha256":"' + $runtimeSha + '","wer_signal":"Application Error/1000/exception=c0000005/module=game.dat"}'
-          $synthetic = @"
-PowerShell transcript header
-LAUNCHER-FEHLER
-game.dat exited during initialization.
-POSITION:
-At line:751 char:9
-STACK:
-at <ScriptBlock>
-AOTR8P_ERROR_MESSAGE_B64=$humanB64
-AOTR8P_DIAG_JSON=$diagJson
-AOTR8P_ENGINE_EXIT=1
-"@
+          $synthetic = @(
+            'PowerShell transcript header',
+            'LAUNCHER-FEHLER',
+            'game.dat exited during initialization.',
+            'POSITION:',
+            'At line:751 char:9',
+            'STACK:',
+            'at <ScriptBlock>',
+            ("AOTR8P_ERROR_MESSAGE_B64=" + $humanB64),
+            ("AOTR8P_DIAG_JSON=" + $diagJson),
+            'AOTR8P_ENGINE_EXIT=1'
+          ) -join [Environment]::NewLine
 
           $detail = Get-EngineFailureDetailFromLog $synthetic
           if ($detail -ne $human) { throw "Machine-readable human error roundtrip failed: $detail" }
