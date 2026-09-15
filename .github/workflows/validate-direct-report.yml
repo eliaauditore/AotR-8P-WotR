@@ -33,7 +33,7 @@ jobs:
         working-directory: .
         run: |
           node - <<'NODE'
-          const url = 'https://a8p-direct-report.vercel.app/api/report';
+          const url = 'https://a8p-direct-report-eliabasile03-6467.vercel.app/api/report';
           const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
           let last = '';
           for (let attempt = 1; attempt <= 12; attempt++) {
@@ -43,7 +43,7 @@ jobs:
               if (res.ok) {
                 const data = JSON.parse(last);
                 if (data && data.ok === true && data.schema === 2) {
-                  console.log('DIRECT_REPORT_PRODUCTION_SCHEMA2=PASS');
+                  console.log('DIRECT_REPORT_CONNECTED_WORKSPACE_SCHEMA2=PASS');
                   process.exit(0);
                 }
               }
