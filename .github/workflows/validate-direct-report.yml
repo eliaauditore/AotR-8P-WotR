@@ -54,9 +54,9 @@ jobs:
           const url = 'https://a8p-direct-report-v2-7f2jz8j7v-eliabasile03-6467.vercel.app/api/report';
           const sleep = ms => new Promise(r => setTimeout(r, ms));
           let last = '';
-          for (let i = 1; i <= 18; i++) {
+          for (let i = 1; i <= 6; i++) {
             try {
-              const res = await fetch(url, {headers:{'user-agent':'AotR-Bridge-E2E/1'}});
+              const res = await fetch(url, {headers:{'user-agent':'AotR-Bridge-E2E/1'}, signal:AbortSignal.timeout(5000)});
               last = await res.text();
               if (res.ok) {
                 const data = JSON.parse(last);
@@ -68,7 +68,7 @@ jobs:
             } catch (e) {
               last = String(e);
             }
-            console.log('bridge not ready attempt ' + i + '/18: ' + last.slice(0,300));
+            console.log('bridge not ready attempt ' + i + '/6: ' + last.slice(0,300));
             await sleep(10000);
           }
           throw new Error('Bridge GET did not become schema2: ' + last.slice(0,500));
@@ -108,7 +108,8 @@ jobs:
           const res = await fetch(url, {
             method:'POST',
             headers:{'content-type':'application/json','user-agent':'AotR-Bridge-E2E/1'},
-            body:JSON.stringify(payload)
+            body:JSON.stringify(payload),
+            signal:AbortSignal.timeout(10000)
           });
           const text = await res.text();
           console.log('BRIDGE_POST_STATUS=' + res.status);
