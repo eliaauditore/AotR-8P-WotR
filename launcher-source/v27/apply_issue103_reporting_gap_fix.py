@@ -344,7 +344,7 @@ for required in (
     'function Get-EngineFailureDetailFromLog',
     'function Get-StructuredEngineDiagnosticFromLog',
     'process_exit_code = $(if ($processDiag)',
-    'observed_ms = $(if ($processDiag)',
+    'observed_ms = $(if ($processDiag -and',
     'runtime_location = $(if ($processDiag)',
     'runtime_sha256 = $(if ($processDiag)',
     'wer_signal = $(if ($processDiag)',
