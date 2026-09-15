@@ -52,26 +52,22 @@ jobs:
         run: |
           node - <<'NODE'
           const url = 'https://a8p-direct-report-v2-7f2jz8j7v-eliabasile03-6467.vercel.app/api/report';
-          const sleep = ms => new Promise(r => setTimeout(r, ms));
-          let last = '';
-          for (let i = 1; i <= 6; i++) {
-            try {
-              const res = await fetch(url, {headers:{'user-agent':'AotR-Bridge-E2E/1'}, signal:AbortSignal.timeout(5000)});
-              last = await res.text();
-              if (res.ok) {
-                const data = JSON.parse(last);
-                if (data.ok === true && data.schema === 2) {
-                  console.log('BRIDGE_SCHEMA2_GET=PASS');
-                  process.exit(0);
-                }
-              }
-            } catch (e) {
-              last = String(e);
-            }
-            console.log('bridge not ready attempt ' + i + '/6: ' + last.slice(0,300));
-            await sleep(10000);
-          }
-          throw new Error('Bridge GET did not become schema2: ' + last.slice(0,500));
+          const res = await fetch(url, {
+            headers:{'user-agent':'AotR-Bridge-E2E/1'},
+            redirect:'manual',
+            signal:AbortSignal.timeout(10000)
+          });
+          const body = await res.text();
+          console.log('BRIDGE_GET_STATUS=' + res.status);
+          console.log('BRIDGE_GET_CONTENT_TYPE=' + (res.headers.get('content-type') || ''));
+          console.log('BRIDGE_GET_LOCATION=' + (res.headers.get('location') || ''));
+          console.log('BRIDGE_GET_BODY_PREFIX=' + body.slice(0,1000).replace(/\s+/g,' '));
+          if (!res.ok) throw new Error('Bridge GET HTTP ' + res.status);
+          let data;
+          try { data = JSON.parse(body); }
+          catch { throw new Error('Bridge GET returned non-JSON body'); }
+          if (data.ok !== true || data.schema !== 2) throw new Error('Bridge GET schema2 contract failed');
+          console.log('BRIDGE_SCHEMA2_GET=PASS');
           NODE
       - name: Live POST through legacy GitHub writer
         working-directory: .
