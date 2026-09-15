@@ -10,6 +10,9 @@ GUI = Path(sys.argv[3])
 EXPECTED_ENGINE_IN = "E9E2452FF56A66D57FF63C0B1654CFE0C856F4D5FA66C558E8F237C9ABABF641"
 EXPECTED_FINAL_IN = "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2"
 EXPECTED_GUI_IN = "222B5DC9EC8B787BF11B2913601FDB06C277EB20697488DDF034852E3F253B70"
+EXPECTED_GUI_OUT = "F17D8DE40DAAD271D9A85FC7C52F8B28DFAF18B35010AF587BF1D6076BA75F5F"
+EXPECTED_ENGINE_OUT = "954D2FD4E23547998D2BC5323BB7026C21384CA4FCA59F7E786E6F0E18088880"
+EXPECTED_FINAL_OUT = "F16522820D7B25CDD4ACF1267B8A300C6BFE661C7FEF636BB611819F7BDC84D3"
 
 def sha_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest().upper()
@@ -179,6 +182,13 @@ write_ps(GUI, gui)
 engine_out = sha_file(ENGINE)
 final_out = sha_file(FINAL)
 gui_out = sha_file(GUI)
+
+if engine_out != EXPECTED_ENGINE_OUT:
+    raise SystemExit(f"Engine output hash mismatch: expected {EXPECTED_ENGINE_OUT}, got {engine_out}")
+if final_out != EXPECTED_FINAL_OUT:
+    raise SystemExit(f"FINAL_STABLE_V7 output hash mismatch: expected {EXPECTED_FINAL_OUT}, got {final_out}")
+if gui_out != EXPECTED_GUI_OUT:
+    raise SystemExit(f"GUI output hash mismatch: expected {EXPECTED_GUI_OUT}, got {gui_out}")
 
 for required in (
     'AddParameter("TargetPid", [int]$GamePid)',
