@@ -9,6 +9,9 @@ GUI = Path(sys.argv[3])
 EXPECTED_ENGINE_IN = "954D2FD4E23547998D2BC5323BB7026C21384CA4FCA59F7E786E6F0E18088880"
 EXPECTED_FINAL_IN = "F16522820D7B25CDD4ACF1267B8A300C6BFE661C7FEF636BB611819F7BDC84D3"
 EXPECTED_GUI_IN = "F17D8DE40DAAD271D9A85FC7C52F8B28DFAF18B35010AF587BF1D6076BA75F5F"
+EXPECTED_ENGINE_OUT = "72967D49C4D35B4A3FAEBAC4F5866D8B910B9A7FC83568D04B9BA81364AC8917"
+EXPECTED_GUI_OUT = "D887A562E7C5700EC4F98AF49F9B807D95A5A91773E1C80091D8D97C3FE9FED3"
+EXPECTED_FINAL_OUT = "F16522820D7B25CDD4ACF1267B8A300C6BFE661C7FEF636BB611819F7BDC84D3"
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
@@ -167,6 +170,13 @@ write_ps(GUI, gui)
 engine_out = sha(ENGINE)
 gui_out = sha(GUI)
 final_out = sha(FINAL)
+
+if engine_out != EXPECTED_ENGINE_OUT:
+    raise SystemExit(f"Engine output hash mismatch: expected {EXPECTED_ENGINE_OUT}, got {engine_out}")
+if gui_out != EXPECTED_GUI_OUT:
+    raise SystemExit(f"GUI output hash mismatch: expected {EXPECTED_GUI_OUT}, got {gui_out}")
+if final_out != EXPECTED_FINAL_OUT:
+    raise SystemExit(f"FINAL_STABLE_V7 output hash mismatch: expected {EXPECTED_FINAL_OUT}, got {final_out}")
 
 for required in (
     '$gameTracker = [Diagnostics.Process]::GetProcessById($gamePid)',
