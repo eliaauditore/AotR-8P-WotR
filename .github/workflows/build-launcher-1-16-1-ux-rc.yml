@@ -116,6 +116,41 @@ jobs:
 
           Write-Host "PUBLIC_IDENTITY_PASS :: version=$version :: sha256=$actual"
 
+      - name: Issue103 diagnostic - trace reporting producer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tmp = Join-Path $env:RUNNER_TEMP 'verify-public-1.16.3'
+          $guiPath = Join-Path $tmp 'gui.ps1'
+          $enginePath = Join-Path $tmp 'engine.ps1'
+          if (-not (Test-Path -LiteralPath $guiPath)) { throw 'Extracted GUI missing' }
+          if (-not (Test-Path -LiteralPath $enginePath)) { throw 'Extracted engine missing' }
+
+          $gui = Get-Content -LiteralPath $guiPath
+          $engine = Get-Content -LiteralPath $enginePath
+
+          function Emit-Matches([string]$label, [string[]]$lines, [string]$pattern, [int]$radius = 5) {
+            Write-Host "=== $label BEGIN ==="
+            $seen = @{}
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -match $pattern) {
+                $lo = [Math]::Max(0, $i - $radius)
+                $hi = [Math]::Min($lines.Count - 1, $i + $radius)
+                for ($n = $lo; $n -le $hi; $n++) {
+                  if (-not $seen.ContainsKey($n)) {
+                    $seen[$n] = $true
+                    Write-Host ('{0}: {1}' -f ($n+1), $lines[$n])
+                  }
+                }
+                Write-Host '---'
+              }
+            }
+            Write-Host "=== $label END ==="
+          }
+
+          Emit-Matches 'ISSUE103_GUI_REPORTING' $gui 'support_bundle|last_error|repair_attempts|fingerprint|direct-report|Invoke-RestMethod|exact_error|launcher_current|A8P-ENGINE-001|A8P-GAMEPROC-001|ConvertTo-Json' 8
+          Emit-Matches 'ISSUE103_ENGINE_ERRORFLOW' $engine 'game\.dat exited during initialization|AOTR8P_ENGINE_EXIT|catch|throw|Write-Host|Write-Error' 5
+
       - name: Defender scan exact current public EXE
         shell: powershell
         run: |
