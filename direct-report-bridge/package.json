@@ -1,0 +1,11 @@
+{
+  "name": "a8p-direct-report-v2-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
