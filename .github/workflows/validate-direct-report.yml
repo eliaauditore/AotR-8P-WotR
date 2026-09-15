@@ -51,7 +51,7 @@ jobs:
         working-directory: .
         run: |
           node - <<'NODE'
-          const url = 'https://a8p-direct-report-v2-eliabasile03-6467.vercel.app/api/report';
+          const url = 'https://a8p-direct-report-v2-7f2jz8j7v-eliabasile03-6467.vercel.app/api/report';
           const sleep = ms => new Promise(r => setTimeout(r, ms));
           let last = '';
           for (let i = 1; i <= 18; i++) {
