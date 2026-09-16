@@ -13,7 +13,7 @@ test('valid schema2 diagnostics become legacy-safe diagnostic block', () => {
     wer_signal: 'Application Error/1000/exception=c0000005/module=game.dat',
   });
 
-  assert.equal(result.diagnostics.process_exit_code, '0XC0000005/-1073741819');
+  assert.equal(result.diagnostics.process_exit_code, '0xC0000005/-1073741819');
   assert.equal(result.diagnostics.observed_ms, 2134);
   assert.equal(result.diagnostics.runtime_location, 'LOCALAPPDATA');
   assert.equal(result.diagnostics.runtime_sha256, sha.toUpperCase());
