@@ -88,13 +88,13 @@ jobs:
           const sha = 'CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC';
           const payload = {
             schema: 2,
-            title: '[Launcher Report] A8P-GAMEPROC-001 - Bridge E2E structured synthetic',
+            title: '[Launcher Report] A8P-GAMEPROC-001 - Bridge E2E final structured synthetic',
             exact_error: 'game.dat exited during initialization.',
             bundle: {
               schema: 2,
               launcher_version: '1.16.4',
               error_code: 'A8P-GAMEPROC-001',
-              fingerprint: 'A8P-FP-103B1D6E0002',
+              fingerprint: 'A8P-FP-103B1D6E0003',
               timestamp: new Date().toISOString(),
               windows: 'Windows 11 Pro | bridge-e2e',
               aotr_version: 'unknown',
