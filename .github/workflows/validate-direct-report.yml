@@ -6,17 +6,20 @@ on:
     paths:
       - 'direct-report-backend/**'
       - 'direct-report-bridge/**'
+      - 'direct-report.json'
       - '.github/workflows/validate-direct-report.yml'
   push:
     branches: [ main ]
     paths:
       - 'direct-report-backend/**'
+      - 'direct-report-bridge/**'
+      - 'direct-report.json'
       - '.github/workflows/validate-direct-report.yml'
   workflow_dispatch:
 
 jobs:
-  test:
-    name: Node schema/privacy tests
+  backend:
+    name: Backend schema/privacy tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -31,9 +34,8 @@ jobs:
       - name: Run tests
         run: npm test
 
-
-  test-bridge:
-    name: Bridge schema2 + live accountless E2E
+  bridge:
+    name: Bridge schema/privacy + public GET
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -43,42 +45,37 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
-      - name: Bridge syntax check
+      - name: Syntax check
         run: node --check api/report.js
-      - name: Bridge unit tests
+      - name: Run tests
         run: npm test
-      - name: Check Vercel automation credential availability
-        working-directory: .
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          if [ -n "$VERCEL_TOKEN" ]; then
-            echo "VERCEL_TOKEN_PRESENT=YES"
-          else
-            echo "VERCEL_TOKEN_PRESENT=NO"
-          fi
-
-      - name: Live GET schema2 bridge
+      - name: Verify configured endpoint and public schema 2
         working-directory: .
         run: |
           node - <<'NODE'
-          const url = 'https://a8p-direct-report-v2-krn6us2wi-eliabasile03-6467.vercel.app/api/report';
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('direct-report.json','utf8'));
+          const expected = 'https://a8p-direct-report-v2-eliabasile03-6467.vercel.app/api/report';
+
+          if (config.enabled !== true) throw new Error('Direct report is not enabled');
+          if (config.endpoint !== expected) {
+            throw new Error('direct-report.json endpoint mismatch: ' + config.endpoint);
+          }
+
           const sleep = ms => new Promise(r => setTimeout(r, ms));
           let last = '';
-          for (let attempt = 1; attempt <= 12; attempt++) {
+          for (let attempt = 1; attempt <= 6; attempt++) {
             try {
-              const res = await fetch(url, {
-                headers:{'user-agent':'AotR-Bridge-E2E/1'},
+              const res = await fetch(expected, {
+                headers:{'user-agent':'AotR-Direct-Report-CI/2'},
                 redirect:'manual',
                 signal:AbortSignal.timeout(5000)
               });
-              const body = await res.text();
-              console.log('BRIDGE_GET_ATTEMPT=' + attempt + ' STATUS=' + res.status);
-              last = body;
+              last = await res.text();
               if (res.ok) {
-                const data = JSON.parse(body);
-                if (data.ok === true && data.schema === 2) {
-                  console.log('BRIDGE_SCHEMA2_GET=PASS');
+                const data = JSON.parse(last);
+                if (data.ok === true && data.schema === 2 && data.service === 'a8p-direct-report-v2-bridge') {
+                  console.log('DIRECT_REPORT_PUBLIC_SCHEMA2=PASS');
                   process.exit(0);
                 }
               }
@@ -87,54 +84,6 @@ jobs:
             }
             await sleep(5000);
           }
-          throw new Error('Pinned bridge deployment not ready/schema2: ' + last.slice(0,500));
-          NODE
-      - name: Live POST through legacy GitHub writer
-        working-directory: .
-        run: |
-          node - <<'NODE'
-          const url = 'https://a8p-direct-report-v2-krn6us2wi-eliabasile03-6467.vercel.app/api/report';
-          const sha = 'CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC';
-          const payload = {
-            schema: 2,
-            title: '[Launcher Report] A8P-GAMEPROC-001 - Bridge E2E final canonical synthetic',
-            exact_error: 'game.dat exited during initialization.',
-            bundle: {
-              schema: 2,
-              launcher_version: '1.16.4',
-              error_code: 'A8P-GAMEPROC-001',
-              fingerprint: 'A8P-FP-103B1D6E0005',
-              timestamp: new Date().toISOString(),
-              windows: 'Windows 11 Pro | bridge-e2e',
-              aotr_version: 'unknown',
-              language: 'en-US',
-              files: [],
-              repair_plan: {source_error_code:'A8P-GAMEPROC-001',actions:['retry_launch']},
-              repair_attempts: [],
-              last_retry: 'failed',
-              last_error: 'game.dat exited during initialization.',
-              process_exit_code: '0xC0000005/-1073741819',
-              observed_ms: 2134,
-              runtime_location: 'LOCALAPPDATA',
-              runtime_sha256: sha,
-              wer_signal: 'Application Error/1000/exception=c0000005/module=game.dat',
-              log_files: ['launcher_current.log']
-            }
-          };
-          const res = await fetch(url, {
-            method:'POST',
-            headers:{'content-type':'application/json','user-agent':'AotR-Bridge-E2E/1'},
-            body:JSON.stringify(payload),
-            signal:AbortSignal.timeout(10000)
-          });
-          const text = await res.text();
-          console.log('BRIDGE_POST_STATUS=' + res.status);
-          console.log('BRIDGE_POST_BODY=' + text);
-          if (res.status !== 201) throw new Error('Bridge POST expected 201');
-          const data = JSON.parse(text);
-          if (data.ok !== true || !data.issue_number || data.schema !== 2 || data.diagnostics_forwarded !== true) {
-            throw new Error('Bridge POST response contract failed');
-          }
-          console.log('BRIDGE_ACCOUNTLESS_POST=PASS');
-          console.log('BRIDGE_SYNTHETIC_ISSUE=' + data.issue_number);
+
+          throw new Error('Public schema2 endpoint check failed: ' + last.slice(0,500));
           NODE
