@@ -53,7 +53,7 @@ jobs:
         working-directory: .
         run: |
           node - <<'NODE'
-          const fs = require('fs');
+          import fs from 'node:fs';
           const config = JSON.parse(fs.readFileSync('direct-report.json','utf8'));
           const expected = 'https://a8p-direct-report-v2-eliabasile03-6467.vercel.app/api/report';
 
