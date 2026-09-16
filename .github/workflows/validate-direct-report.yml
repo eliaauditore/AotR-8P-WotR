@@ -62,7 +62,7 @@ jobs:
         working-directory: .
         run: |
           node - <<'NODE'
-          const url = 'https://a8p-direct-report-v2-q9dtwrv3f-eliabasile03-6467.vercel.app/api/report';
+          const url = 'https://a8p-direct-report-v2-krn6us2wi-eliabasile03-6467.vercel.app/api/report';
           const sleep = ms => new Promise(r => setTimeout(r, ms));
           let last = '';
           for (let attempt = 1; attempt <= 12; attempt++) {
@@ -93,17 +93,17 @@ jobs:
         working-directory: .
         run: |
           node - <<'NODE'
-          const url = 'https://a8p-direct-report-v2-q9dtwrv3f-eliabasile03-6467.vercel.app/api/report';
+          const url = 'https://a8p-direct-report-v2-krn6us2wi-eliabasile03-6467.vercel.app/api/report';
           const sha = 'CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC';
           const payload = {
             schema: 2,
-            title: '[Launcher Report] A8P-GAMEPROC-001 - Bridge E2E deployment-pinned synthetic',
+            title: '[Launcher Report] A8P-GAMEPROC-001 - Bridge E2E final canonical synthetic',
             exact_error: 'game.dat exited during initialization.',
             bundle: {
               schema: 2,
               launcher_version: '1.16.4',
               error_code: 'A8P-GAMEPROC-001',
-              fingerprint: 'A8P-FP-103B1D6E0004',
+              fingerprint: 'A8P-FP-103B1D6E0005',
               timestamp: new Date().toISOString(),
               windows: 'Windows 11 Pro | bridge-e2e',
               aotr_version: 'unknown',
