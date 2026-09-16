@@ -12,8 +12,8 @@ function sanitizeExitCode(v) {
   if (!value) return null;
   if (/^unavailable$/i.test(value)) return 'unavailable';
   if (/^0[xX][0-9A-Fa-f]{8}\/-?\d+$/.test(value)) {
-    const parts = value.split('/');
-    return parts[0].toUpperCase() + '/' + parts[1];
+    const [hex, signed] = value.split('/');
+    return '0x' + hex.slice(2).toUpperCase() + '/' + signed;
   }
   if (/^-?\d+$/.test(value)) return value;
   return null;
