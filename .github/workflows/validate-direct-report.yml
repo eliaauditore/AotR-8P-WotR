@@ -5,17 +5,21 @@ on:
     branches: [ main ]
     paths:
       - 'direct-report-backend/**'
+      - 'direct-report-bridge/**'
+      - 'direct-report.json'
       - '.github/workflows/validate-direct-report.yml'
   push:
     branches: [ main ]
     paths:
       - 'direct-report-backend/**'
+      - 'direct-report-bridge/**'
+      - 'direct-report.json'
       - '.github/workflows/validate-direct-report.yml'
   workflow_dispatch:
 
 jobs:
-  test:
-    name: Node schema/privacy tests
+  backend:
+    name: Backend schema/privacy tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -29,3 +33,57 @@ jobs:
         run: node --check api/report.js
       - name: Run tests
         run: npm test
+
+  bridge:
+    name: Bridge schema/privacy + public GET
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: direct-report-bridge
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      - name: Syntax check
+        run: node --check api/report.js
+      - name: Run tests
+        run: npm test
+      - name: Verify configured endpoint and public schema 2
+        working-directory: .
+        run: |
+          node - <<'NODE'
+          import fs from 'node:fs';
+          const config = JSON.parse(fs.readFileSync('direct-report.json','utf8'));
+          const expected = 'https://a8p-direct-report-v2-eliabasile03-6467.vercel.app/api/report';
+
+          if (config.enabled !== true) throw new Error('Direct report is not enabled');
+          if (config.endpoint !== expected) {
+            throw new Error('direct-report.json endpoint mismatch: ' + config.endpoint);
+          }
+
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          let last = '';
+          for (let attempt = 1; attempt <= 6; attempt++) {
+            try {
+              const res = await fetch(expected, {
+                headers:{'user-agent':'AotR-Direct-Report-CI/2'},
+                redirect:'manual',
+                signal:AbortSignal.timeout(5000)
+              });
+              last = await res.text();
+              if (res.ok) {
+                const data = JSON.parse(last);
+                if (data.ok === true && data.schema === 2 && data.service === 'a8p-direct-report-v2-bridge') {
+                  console.log('DIRECT_REPORT_PUBLIC_SCHEMA2=PASS');
+                  process.exit(0);
+                }
+              }
+            } catch (e) {
+              last = String(e);
+            }
+            await sleep(5000);
+          }
+
+          throw new Error('Public schema2 endpoint check failed: ' + last.slice(0,500));
+          NODE

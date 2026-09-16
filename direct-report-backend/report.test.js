@@ -59,7 +59,7 @@ test('schema 2 preserves valid structured early-exit diagnostics', () => {
   }));
 
   assert.equal(clean.schema, 2);
-  assert.equal(clean.process_exit_code, '0XC0000005/-1073741819');
+  assert.equal(clean.process_exit_code, '0xC0000005/-1073741819');
   assert.equal(clean.observed_ms, 2134);
   assert.equal(clean.runtime_location, 'LOCALAPPDATA');
   assert.equal(clean.runtime_sha256, runtimeSha.toUpperCase());
@@ -67,7 +67,7 @@ test('schema 2 preserves valid structured early-exit diagnostics', () => {
 
   const body = issueBody(clean, clean.last_error);
   assert.match(body, /### Early-exit diagnostics/);
-  assert.match(body, /process_exit_code: 0XC0000005\/-1073741819/);
+  assert.match(body, /process_exit_code: 0xC0000005\/-1073741819/);
   assert.match(body, /observed_ms: 2134/);
   assert.match(body, /runtime_location: LOCALAPPDATA/);
   assert.match(body, /runtime_sha256: CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC/);
@@ -102,7 +102,7 @@ test('WER sanitizer strips path-looking data and collapses whitespace', () => {
 
 test('diagnostic scalar sanitizers enforce bounded public schema', () => {
   assert.equal(sanitizeExitCode('unavailable'), 'unavailable');
-  assert.equal(sanitizeExitCode('0xC0000005/-1073741819'), '0XC0000005/-1073741819');
+  assert.equal(sanitizeExitCode('0xC0000005/-1073741819'), '0xC0000005/-1073741819');
   assert.equal(sanitizeExitCode('-1'), '-1');
   assert.equal(sanitizeExitCode('abc'), null);
 

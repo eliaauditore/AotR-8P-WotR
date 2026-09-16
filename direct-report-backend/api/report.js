@@ -61,9 +61,9 @@ function sanitizeExitCode(v) {
   const value = str(v, 64).trim();
   if (!value) return null;
   if (/^unavailable$/i.test(value)) return 'unavailable';
-  if (/^0x[0-9A-Fa-f]{8}\/-?\d+$/.test(value)) {
+  if (/^0[xX][0-9A-Fa-f]{8}\/-?\d+$/.test(value)) {
     const [hex, signed] = value.split('/');
-    return hex.toUpperCase() + '/' + signed;
+    return '0x' + hex.slice(2).toUpperCase() + '/' + signed;
   }
   if (/^-?\d+$/.test(value)) return value;
   return null;
