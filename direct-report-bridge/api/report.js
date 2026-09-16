@@ -76,7 +76,7 @@ function diagnosticBlock(bundle) {
   return { block, diagnostics: d };
 }
 
-function legacyBundle(input = {}, block = '') {
+function legacyBundle(input = {}, block = '', diagnostics = null) {
   const files = Array.isArray(input.files) ? input.files.slice(0, 32) : [];
   const attempts = Array.isArray(input.repair_attempts) ? input.repair_attempts.slice(0, 32) : [];
   const logFiles = Array.isArray(input.log_files) ? input.log_files.slice(0, 16).map(x => str(x, 100)) : [];
@@ -98,6 +98,11 @@ function legacyBundle(input = {}, block = '') {
     repair_attempts: attempts,
     last_retry: str(input.last_retry, 80) || null,
     last_error: combinedError,
+    process_exit_code: diagnostics ? diagnostics.process_exit_code : null,
+    observed_ms: diagnostics ? diagnostics.observed_ms : null,
+    runtime_location: diagnostics ? diagnostics.runtime_location : null,
+    runtime_sha256: diagnostics ? diagnostics.runtime_sha256 : null,
+    wer_signal: diagnostics ? diagnostics.wer_signal : null,
     log_files: logFiles,
   };
 }
@@ -149,7 +154,7 @@ module.exports = async function handler(req, res) {
       schema: 1,
       title: sanitizeText(input.title || '', 180),
       exact_error: sanitizeText(((input.exact_error || bundle.last_error || '') + result.block).trim(), MAX_ERROR_TEXT),
-      support_bundle: legacyBundle(bundle, result.block),
+      support_bundle: legacyBundle(bundle, result.block, result.diagnostics),
     };
 
     const upstream = await fetch(LEGACY_UPSTREAM, {
