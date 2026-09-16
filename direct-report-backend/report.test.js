@@ -67,7 +67,7 @@ test('schema 2 preserves valid structured early-exit diagnostics', () => {
 
   const body = issueBody(clean, clean.last_error);
   assert.match(body, /### Early-exit diagnostics/);
-  assert.match(body, /process_exit_code: 0XC0000005\/-1073741819/);
+  assert.match(body, /process_exit_code: 0xC0000005\/-1073741819/);
   assert.match(body, /observed_ms: 2134/);
   assert.match(body, /runtime_location: LOCALAPPDATA/);
   assert.match(body, /runtime_sha256: CC08275D60FF8E3BFD4374C29D61304DEA8336E6DD00AB8ADD88B1DF95A705DC/);
