@@ -48,11 +48,12 @@ test('legacy bundle preserves old fields and embeds diagnostics in last_error', 
     fingerprint: 'A8P-FP-ABCDEF012345',
     last_error: 'game.dat exited during initialization.',
     log_files: ['launcher_current.log'],
-  }, result.block);
+  }, result.block, result.diagnostics);
 
   assert.equal(bundle.schema, 1);
   assert.equal(bundle.launcher_version, '1.16.4');
   assert.match(bundle.last_error, /observed_ms=900/);
   assert.deepEqual(bundle.log_files, ['launcher_current.log']);
-  assert.equal(Object.hasOwn(bundle, 'process_exit_code'), false);
+  assert.equal(bundle.observed_ms, 900);
+  assert.equal(bundle.process_exit_code, null);
 });
