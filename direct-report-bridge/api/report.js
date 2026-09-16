@@ -149,7 +149,7 @@ module.exports = async function handler(req, res) {
       schema: 1,
       title: sanitizeText(input.title || '', 180),
       exact_error: sanitizeText(((input.exact_error || bundle.last_error || '') + result.block).trim(), MAX_ERROR_TEXT),
-      bundle: legacyBundle(bundle, result.block),
+      support_bundle: legacyBundle(bundle, result.block),
     };
 
     const upstream = await fetch(LEGACY_UPSTREAM, {
