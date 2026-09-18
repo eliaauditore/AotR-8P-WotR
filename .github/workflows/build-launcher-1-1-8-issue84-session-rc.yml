@@ -1,0 +1,81 @@
+name: Build Launcher 1.1.8 Issue84 Session RC
+
+on:
+  push:
+    branches:
+      - hotfix/runtime-session-temp-1.1.8-rc
+    paths:
+      - 'launcher-source/v25/**'
+      - '.github/workflows/build-launcher-1-1-8-issue84-session-rc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build 1.1.8 transient-session candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & '.\launcher-source\v25\BUILD_LAUNCHER_1_1_8_ISSUE84_SESSION_CANDIDATE.ps1' -OutputRoot '.\_V25_1_1_8_BUILD'
+
+      - name: Validate source contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $engine=(Resolve-Path '.\_V25_1_1_8_BUILD\work\resources\launcher_engine.ps1').Path
+          $gui=(Resolve-Path '.\_V25_1_1_8_BUILD\work\resources\launcher_gui.ps1').Path
+          $cs=(Resolve-Path '.\_V25_1_1_8_BUILD\work\launcher_v25.cs').Path
+          foreach($path in @($engine,$gui)){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw "PS5.1 parse failure: $path :: $($errors[0].Message)"}
+          }
+          $engineText=[IO.File]::ReadAllText($engine)
+          $guiText=[IO.File]::ReadAllText($gui)
+          $csText=[IO.File]::ReadAllText($cs)
+          foreach($needle in @('AOTR8P_SESSION_','AOTR8P_SESSION.json','Write-AotR8PSessionMarker','--cleanup-runtime','runtime\sessions')){
+            if(-not $engineText.Contains($needle)){throw "engine contract missing: $needle"}
+          }
+          if($engineText.Contains('Join-Path $runtimeStageRoot ("_AOTR_8P_WOTR_RUNTIME_V4_" + $PID)')){throw 'legacy V4 session creation remains'}
+          if($guiText.Contains('Move-Item -LiteralPath $runtimePath -Destination $quarantine')){throw 'persistent quarantine move remains'}
+          if($guiText.Contains('$leaf + "_REPAIR_"')){throw 'persistent REPAIR name creation remains'}
+          foreach($needle in @('RunRuntimeCleanupHelper','DeleteRuntimeTreeNoFollow','CleanupStaleRuntimeSessions','IsValidRuntimeSessionPath')){
+            if(-not $csText.Contains($needle)){throw "C# cleanup contract missing: $needle"}
+          }
+          Write-Host 'ISSUE84_TRANSIENT_SESSION_SOURCE_CONTRACT=PASS'
+
+      - name: Verify candidate identity and hosted Defender
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path '.\_V25_1_1_8_BUILD\package\AotR 8P WotR Mod.exe').Path
+          $fvi=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+          if($fvi.ProductVersion -ne '1.1.8'){throw "ProductVersion=$($fvi.ProductVersion)"}
+          $hash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          Write-Host "ISSUE84_SESSION_RC_EXE_SHA256=$hash"
+          $mp=@(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if(-not $mp){throw 'Windows Defender MpCmdRun.exe unavailable'}
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          if($LASTEXITCODE -ne 0){throw "Hosted Defender scan exit=$LASTEXITCODE"}
+          Write-Host 'ISSUE84_SESSION_HOSTED_DEFENDER=PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AotR-1.1.8-Issue84-Session-RC
+          path: |
+            _V25_1_1_8_BUILD/package/**
+            _V25_1_1_8_BUILD/SHA256SUMS.json
+            _V25_1_1_8_BUILD/*.zip
+            _V25_1_1_8_BUILD/*.sha256.txt
+            _V25_1_1_8_BUILD/DEFENDER_SCAN.txt
+          if-no-files-found: error
+          retention-days: 90
