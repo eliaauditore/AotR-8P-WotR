@@ -1,0 +1,52 @@
+name: Build SignPath Neutral Assets
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "launcher-source/v20-signpath/GENERATE_NEUTRAL_ASSETS.ps1"
+      - "tools/guardian/VERIFY_SIGNPATH_SOURCE_BOUNDARY.ps1"
+      - ".github/workflows/build-signpath-neutral-assets.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "launcher-source/v20-signpath/GENERATE_NEUTRAL_ASSETS.ps1"
+      - "tools/guardian/VERIFY_SIGNPATH_SOURCE_BOUNDARY.ps1"
+      - ".github/workflows/build-signpath-neutral-assets.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: signpath-neutral-assets
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Generate neutral visual assets
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '_signpath_neutral_assets'))
+          & '.\launcher-source\v20-signpath\GENERATE_NEUTRAL_ASSETS.ps1' -OutputRoot $output
+
+      - name: Verify SignPath source boundary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '_signpath_neutral_assets'))
+          $report = Join-Path $output 'SIGNPATH_SOURCE_BOUNDARY.md'
+          & '.\tools\guardian\VERIFY_SIGNPATH_SOURCE_BOUNDARY.ps1' `
+              -SourceRoot $output `
+              -ReportPath $report
+
+      - name: Upload neutral asset PoC
+        uses: actions/upload-artifact@v4
+        with:
+          name: signpath-neutral-assets-poc
+          path: _signpath_neutral_assets/**
+          if-no-files-found: error
+          retention-days: 30
