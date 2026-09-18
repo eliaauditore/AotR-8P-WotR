@@ -1,0 +1,165 @@
+{
+  "schema": 1,
+  "purpose": "Ownership and signing-scope classification for the V19 donor-free successor. This file is a provenance gate, not a license grant.",
+  "frozen_release": {
+    "version": "1.1.2",
+    "release_commit": "131aacd19f8ea02399db6ad0dab69c4253fbe834",
+    "exe_sha256": "5B4D12B7BF43D72860E27C51A3D8AC7AC00CA53DB58499E41AC735F7B7ECED0E",
+    "immutable": true
+  },
+  "provenance_source": {
+    "workflow_run": 33123908148,
+    "artifact_id": 9667562167,
+    "artifact_name": "v1.1.1-launcher-provenance",
+    "artifact_digest": "sha256:c19970b6c90ed41911d4e334b0c5660f5ee6477fae8cee417ad419f37ae71ba9",
+    "transform_source_ref": "166184ec063ded18ff619d3e6a426179d4d886e7",
+    "note": "The artifact was used once to materialize maintained repository resources. Successor builds must not read the artifact or any frozen launcher donor."
+  },
+  "classes": [
+    "PROJECT_OWNED_SOURCE_RESOURCE",
+    "SYSTEM_DEPENDENCY",
+    "ALLOWED_UPSTREAM_DEPENDENCY",
+    "THIRD_PARTY_AOTR_BFME_CONTENT",
+    "REVIEW_REQUIRED"
+  ],
+  "resources": [
+    {
+      "path": "launcher-source/v19/launcher.cs",
+      "role": "C# launcher source template",
+      "ownership_class": "PROJECT_OWNED_SOURCE_RESOURCE",
+      "rights_status": "PROJECT_SOURCE; formal OSS license scope still pending #68/#52",
+      "signed_exe_input": true,
+      "signpath_status": "ELIGIBLE_AFTER_PROJECT_LICENSE_SCOPE_IS_ESTABLISHED"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/launcher_gui.ps1",
+      "role": "launcher GUI PowerShell source",
+      "sha256": "135B1FDD64B84B0DE84BC7526F04157A790228DFC49FF5DD6253C89023D71EBD",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Project-specific launcher code is source-materialized, but legal authorship/license provenance was previously donor-derived and must be confirmed before an OSS grant.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_ON_RIGHTS_CONFIRMATION"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/launcher_engine.ps1",
+      "role": "launcher/runtime engine PowerShell source",
+      "sha256": "5DB2F749F10E84322BC471FFF04E25326EFF194FA440175FE9841ED13367F938",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Project-specific runtime orchestration is source-materialized; reverse-engineered compatibility logic and authorship/license scope require review.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_ON_RIGHTS_AND_POLICY_REVIEW"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/final_stable_v7.ps1",
+      "role": "FINAL_STABLE_V7 runtime patch source",
+      "sha256": "72D00490538BE2222F5BAAF3D8A1648A86071D3A098946A7B8751E7D337300E2",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Contains reverse-engineered runtime-hook/compatibility data and byte constants. Determine which bytes are original project patch logic versus copied game bytes before licensing/signing approval.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_ON_PROVENANCE_AND_POLICY_REVIEW"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/v7_shellcode.bin",
+      "role": "V7 runtime shellcode resource",
+      "sha256": "60EECE4660C3BA0AD183EB82B82DCDACF3ECA6DC892C8FAFCD629A92170ED45A",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Binary patch payload is now source-controlled as an authoritative resource, but a transparent authored/generation chain and policy review are still required.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_ON_PROVENANCE_AND_POLICY_REVIEW"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/launcher_skin.png",
+      "role": "launcher background/skin",
+      "sha256": "BA044C14023AAF21FC4822D068C07E8991DC6CAEDAC6BCD5F1B50935BA9C7AC6",
+      "ownership_class": "THIRD_PARTY_AOTR_BFME_CONTENT",
+      "rights_status": "Age of the Ring branded fantasy artwork; no project OSS relicensing authority is assumed.",
+      "signed_exe_input": true,
+      "signpath_status": "EXCLUDE_OR_REPLACE_WITH_CLEARLY_OWNED_ASSET"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/launcher.ico",
+      "role": "PE launcher icon",
+      "sha256": "3F5784964233DC701B2E9ABA1DD2EF3DDCC47FB5955D0B986FF5D3046DFE1F1A",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Branded visual asset; original author/license has not been established.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_UNTIL_OWNERSHIP_PROVEN_OR_REPLACED"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/row1cleanpatch.png",
+      "role": "row 1 visual cleanup patch",
+      "sha256": "D4DC9A47F0E2FD9715D92F8DD4C3831B9AB95F8CA34E98937F019B7574294177",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Likely derived/cropped from launcher/AotR visual material; source ownership not established.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_UNTIL_OWNERSHIP_PROVEN_OR_REPLACED"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/row2cleanpatch.png",
+      "role": "row 2 visual cleanup patch",
+      "sha256": "58B9A7173CE1C9C30C85EE76D15D54E3D40B3E7E14E25D0C1FE5D8EFD89E6D8E",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Likely derived/cropped from launcher/AotR visual material; source ownership not established.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_UNTIL_OWNERSHIP_PROVEN_OR_REPLACED"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/row3cleanpatch.png",
+      "role": "row 3 visual cleanup patch",
+      "sha256": "7F86C02BC02D2E57D66202AF9C526D6FAE13CFC9B7CB1EFF1BB61C165B25278C",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Likely derived/cropped from launcher/AotR visual material; source ownership not established.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_UNTIL_OWNERSHIP_PROVEN_OR_REPLACED"
+    },
+    {
+      "path": "launcher-source/v19-successor/resources/readycleanpatch.png",
+      "role": "ready-state visual cleanup patch",
+      "sha256": "35DCBCBE6E625C5C06EC36BAB3CA51A6F4EE29DA3DFF4CAEEDD69BC87D873DF3",
+      "ownership_class": "REVIEW_REQUIRED",
+      "rights_status": "Likely derived/cropped from launcher/AotR visual material; source ownership not established.",
+      "signed_exe_input": true,
+      "signpath_status": "BLOCKED_UNTIL_OWNERSHIP_PROVEN_OR_REPLACED"
+    },
+    {
+      "path": "generated:launcher.manifest",
+      "role": "native PE application manifest",
+      "ownership_class": "PROJECT_OWNED_SOURCE_RESOURCE",
+      "rights_status": "Generated directly by the donor-free builder from repository-controlled text.",
+      "signed_exe_input": true,
+      "signpath_status": "ELIGIBLE_AFTER_PROJECT_LICENSE_SCOPE_IS_ESTABLISHED"
+    },
+    {
+      "path": "Windows/.NET Framework csc.exe + System.* + System.Management.Automation",
+      "role": "compiler/runtime framework dependencies",
+      "ownership_class": "SYSTEM_DEPENDENCY",
+      "rights_status": "Microsoft/Windows platform components; referenced by the build, not copied into project source as proprietary payloads.",
+      "signed_exe_input": false,
+      "signpath_status": "PLATFORM_DEPENDENCY"
+    },
+    {
+      "path": "payload_ui.big",
+      "role": "AotR/BFME 8-player UI payload",
+      "sha256": "827988C328E010A598BFAD16C9BFF830C3F904EAF1640F162C8124E8C6ABA376",
+      "ownership_class": "THIRD_PARTY_AOTR_BFME_CONTENT",
+      "rights_status": "Separate public mod payload; not embedded into the launcher EXE and not included in launcher OSS licensing scope.",
+      "signed_exe_input": false,
+      "signpath_status": "OUTSIDE_SIGNED_LAUNCHER_SCOPE"
+    },
+    {
+      "path": "payload_paper.inc",
+      "role": "AotR/BFME campaign payload",
+      "sha256": "3FF683843190A323DE9299C17DCD36AF24C5C00473119478E3FAF068BF904E43",
+      "ownership_class": "THIRD_PARTY_AOTR_BFME_CONTENT",
+      "rights_status": "Separate public mod payload; not embedded into the launcher EXE and not included in launcher OSS licensing scope.",
+      "signed_exe_input": false,
+      "signpath_status": "OUTSIDE_SIGNED_LAUNCHER_SCOPE"
+    }
+  ],
+  "current_verdict": {
+    "donor_free_build_possible": true,
+    "signpath_foundation_ready": false,
+    "reason": "Source-chain cleanup is separable from rights clearance. Visual assets plus FINAL_STABLE/V7 shellcode remain blocked on ownership/provenance/policy review.",
+    "license_action": "DO_NOT_APPLY_AN_OSS_LICENSE_TO_THE_WHOLE_REPOSITORY_OR_TO_REVIEW_REQUIRED/THIRD_PARTY_RESOURCES"
+  }
+}
