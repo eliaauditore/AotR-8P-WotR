@@ -35,6 +35,8 @@ class ScanTest(unittest.TestCase):
         p.write_bytes(bigf([('MpGameSetup.apt', b'ABC'), ('irrelevant.ini', b'X')]))
         result = parse_big_entries(p)
         self.assertEqual(result['format'], 'BIGF')
+        self.assertEqual(result['warnings'], [])
+        self.assertEqual(result['declared_size'], p.stat().st_size)
         self.assertEqual(result['member_count'], 2)
         self.assertEqual(result['entries'][0]['name'], 'MpGameSetup.apt')
         self.assertEqual(result['entries'][0]['size'], 3)
