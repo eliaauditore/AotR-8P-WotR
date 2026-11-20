@@ -12,7 +12,7 @@ def bigf(entries):
     # BIGF / BIG4 standard header, big-endian metadata, null-terminated names
     header_size = 16 + sum(8 + len(n.encode('latin1')) + 1 for n, b in entries)
     size = header_size + sum(len(b) for n, b in entries)
-    out = bytearray(b'BIGF' + struct.pack('>III', size, len(entries), header_size))
+    out = bytearray(b'BIGF' + struct.pack('<I', size) + struct.pack('>II', len(entries), header_size))
     cursor = header_size
     for name, data in entries:
         out += struct.pack('>II', cursor, len(data)) + name.encode('latin1') + b'\0'
@@ -49,18 +49,18 @@ class ScanTest(unittest.TestCase):
 
     def test_corrupt_big_count(self):
         p = self.inst / 'MpGameSetup.big'
-        p.write_bytes(b'BIGF' + struct.pack('>III', 16, 1000000, 16))
+        p.write_bytes(b'BIGF' + struct.pack('<I', 16) + struct.pack('>II', 1000000, 16))
         self.assertIn('Unplausible', parse_big_entries(p)['warnings'][0])
 
     def test_truncated_big_table(self):
         p = self.inst / 'MpGameSetup.big'
-        p.write_bytes(b'BIGF' + struct.pack('>III', 20, 1, 20) + b'\x00'*4)
+        p.write_bytes(b'BIGF' + struct.pack('<I', 20) + struct.pack('>II', 1, 20) + b'\x00'*4)
         self.assertIn('Incomplete', parse_big_entries(p)['warnings'][0])
 
     def test_wrong_size_warning(self):
         p = self.inst / 'MpGameSetup.big'
         data = bytearray(bigf([('MpGameSetup.apt', b'A')]))
-        data[4:8] = (12).to_bytes(4, 'big')
+        data[4:8] = (12).to_bytes(4, 'little')
         p.write_bytes(data)
         self.assertTrue(parse_big_entries(p)['warnings'])
 
