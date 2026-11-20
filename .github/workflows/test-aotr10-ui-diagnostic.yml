@@ -1,0 +1,22 @@
+name: AotR 10 UI diagnostic tests
+on:
+  push:
+    paths:
+      - "tools/compat/**"
+      - ".github/workflows/test-aotr10-ui-diagnostic.yml"
+  pull_request:
+    paths:
+      - "tools/compat/**"
+      - ".github/workflows/test-aotr10-ui-diagnostic.yml"
+permissions:
+  contents: read
+jobs:
+  test-ui-archive-collector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run offline unit tests
+        run: python -m unittest discover -s tools/compat -p "test_aotr10_ui_diagnose.py" -v
