@@ -128,7 +128,8 @@ def parse_big_entries(path: pathlib.Path):
         if len(head) < 16 or head[:4] not in (b'BIGF', b'BIG4'):
             return result
         result['format'] = head[:4].decode('ascii')
-        declared_size, count, header_size = struct.unpack('>III', head[4:16])
+        declared_size = struct.unpack_from('<I', head, 4)[0]
+        count, header_size = struct.unpack_from('>II', head, 8)
         result.update(declared_size=declared_size, member_count=count, header_size=header_size)
         if count > 100000 or header_size > size or header_size > 16 * 1024 * 1024:
             result['warnings'].append('Unplausible header/count; no members parsed')
